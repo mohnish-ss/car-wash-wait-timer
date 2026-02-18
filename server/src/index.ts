@@ -19,24 +19,6 @@ app.use(cors());
 app.use(express.json());
 app.use(express.json());
 
-// ── Production: Strip mock data scripts ──────────────────────────
-app.get("/", (req, res, next) => {
-  if (process.env.NODE_ENV === "production") {
-    const fs = require("fs");
-    const indexHtml = path.join(__dirname, "../public/index.html");
-    fs.readFile(indexHtml, "utf8", (err: any, data: string) => {
-      if (err) return next(); // Fallback to static
-      // Remove mock scripts
-      const cleanHtml = data
-        .replace('<script src="/mock-carwashes.js"></script>', "")
-        .replace('<script src="/mock-api-integration.js"></script>', "");
-      res.send(cleanHtml);
-    });
-  } else {
-    next(); // In dev, let express.static handle it (serves file as-is)
-  }
-});
-
 app.use(express.static(path.join(__dirname, "../public")));
 
 // ---------------------------------------------------------------------------
@@ -71,7 +53,7 @@ interface CachedCarWash {
 const carWashCache = new Map<string, CachedCarWash>();
 
 /** How long a cache entry is considered fresh (20 minutes) */
-const CACHE_TTL_MS = 20 * 60 * 1000;
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Helpers
