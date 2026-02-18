@@ -255,6 +255,10 @@ function setupMapEvents() {
         if (selectedWash) window.open(`https://www.google.com/maps/dir/?api=1&destination=${selectedWash.latitude},${selectedWash.longitude}`);
     });
 
+    document.getElementById('cardReportBtn').addEventListener('click', () => {
+        if (selectedWash) openReportModal();
+    });
+
     document.getElementById('cardFavBtn').addEventListener('click', () => {
         if (!selectedWash) return;
         const nowFav = toggleFavorite(selectedWash.id);
@@ -384,8 +388,23 @@ document.querySelectorAll('.report-btn').forEach(btn => {
             fetch('/api/carwashes/' + selectedWash.id + '/report', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ estimatedMinutes: mins })
-            }).then(() => { closeReportModal(); const c = map.getCenter(); doSearch(c.lat, c.lng); })
-                .catch(() => closeReportModal());
+            }).then(() => {
+                closeReportModal();
+                // Refresh the card with the reported wait
+                const updated = allCarWashes.find(w => w.id === selectedWash.id);
+                if (updated) {
+                    updated.waitTimeLogs = [{
+                        id: 'user_report',
+                        carWashId: updated.id,
+                        timestamp: new Date().toISOString(),
+                        busynessScore: Math.round(mins * 4),
+                        isLive: false,
+                        estimatedMinutes: mins
+                    }];
+                    plotMarkers(allCarWashes);
+                    showBottomCard(updated);
+                }
+            }).catch(() => closeReportModal());
         } else { closeReportModal(); }
     });
 });

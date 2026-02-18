@@ -308,6 +308,43 @@ app.get("/api/carwashes/:id", (req, res) => {
 });
 
 /**
+ * POST /api/carwashes/:id/report
+ *
+ * User-reported wait time. Updates the in-memory cache with the reported value.
+ */
+app.post("/api/carwashes/:id/report", (req, res) => {
+  const cw = carWashCache.get(req.params.id);
+  if (!cw) {
+    return res.status(404).json({ error: "Car wash not found" });
+  }
+
+  const { estimatedMinutes } = req.body;
+  if (typeof estimatedMinutes !== "number" || estimatedMinutes < 0) {
+    return res
+      .status(400)
+      .json({ error: "estimatedMinutes is required (number >= 0)" });
+  }
+
+  const busynessScore = Math.min(100, Math.round(estimatedMinutes * 4));
+  const nowIso = new Date().toISOString();
+
+  // Update cache with user-reported data
+  cw.waitTimeLogs = [
+    {
+      id: `report_${cw.id}_${Date.now()}`,
+      carWashId: cw.id,
+      timestamp: nowIso,
+      busynessScore,
+      isLive: false,
+      estimatedMinutes,
+    },
+  ];
+  cw.cachedAt = Date.now(); // Keep it fresh
+
+  res.json({ success: true, estimatedMinutes, busynessScore });
+});
+
+/**
  * GET /api/geocode?address=123+Main+St,+New+York
  *
  * Geocode an address to lat/lng using OpenStreetMap Nominatim (free, no key).
