@@ -9,7 +9,8 @@ import { cleanAddress, detectBrandAndType } from "./utils";
 // Configuration
 // ---------------------------------------------------------------------------
 
-dotenv.config({ path: "../.env" });
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -355,9 +356,13 @@ app.get("/api/health", (_req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Start server
+// Start server (only when run directly, not when imported by Vercel)
 // ---------------------------------------------------------------------------
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-});
+if (process.env.VERCEL !== "1") {
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
+  });
+}
+
+export default app;

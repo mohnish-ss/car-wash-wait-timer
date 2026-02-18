@@ -1,7 +1,9 @@
 import axios from "axios";
+import path from "path";
 import dotenv from "dotenv";
 
-dotenv.config({ path: "../.env" });
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
 const API_KEY = process.env.BESTTIME_API_KEY || "";
 const BASE_URL = "https://besttime.app/api/v1";

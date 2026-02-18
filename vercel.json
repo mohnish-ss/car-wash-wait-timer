@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "buildCommand": "cd server && npm install && npx tsc",
+  "outputDirectory": "server/public",
+  "rewrites": [{ "source": "/api/(.*)", "destination": "/api" }],
+  "functions": {
+    "server/api/index.ts": {
+      "includeFiles": "server/**"
+    }
+  }
+}
