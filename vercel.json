@@ -4,7 +4,7 @@
   "outputDirectory": "server/public",
   "rewrites": [{ "source": "/api/(.*)", "destination": "/api" }],
   "functions": {
-    "server/api/index.ts": {
+    "api/index.ts": {
       "includeFiles": "server/**"
     }
   }
