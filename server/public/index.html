@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Flow — Car Wash Wait Times</title>
+  <meta name="description" content="Find nearby car washes and check real-time wait times" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+    rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+
+<body>
+
+  <!-- ═══════ Loading Overlay ═══════ -->
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-spinner"></div>
+    <p>Flow</p>
+    <span class="sub">Finding nearby car washes…</span>
+  </div>
+
+  <!-- ═══════ Navbar ═══════ -->
+  <header class="navbar" id="navbar">
+    <a class="logo" href="#map">
+      <div class="logo-icon"><span class="material-symbols-outlined">local_car_wash</span></div>
+      <span class="logo-text">Flow</span>
+    </a>
+    <nav>
+      <a href="#map" class="active" data-page="map"><span class="material-symbols-outlined"
+          style="font-size:18px;vertical-align:middle;margin-right:4px">map</span>Map</a>
+      <a href="#favorites" data-page="favorites"><span class="material-symbols-outlined"
+          style="font-size:18px;vertical-align:middle;margin-right:4px">favorite</span>Favorites</a>
+      <a href="#settings" data-page="settings"><span class="material-symbols-outlined"
+          style="font-size:18px;vertical-align:middle;margin-right:4px">settings</span>Settings</a>
+    </nav>
+    <div class="right">
+      <div class="avatar"><span class="material-symbols-outlined" style="font-size:22px">person</span></div>
+    </div>
+  </header>
+
+  <!-- ═══════ PAGE: MAP ═══════ -->
+  <div class="page page-map active" id="page-map">
+    <div id="map"></div>
+
+    <!-- Search bar — location button integrated -->
+    <div class="search-bar glass" id="searchBar">
+      <span class="material-symbols-outlined icon">search</span>
+      <input type="text" id="searchInput" placeholder="Search area or car wash name…" />
+      <button class="icon-btn" id="locateBtn" title="Use my location">
+        <span class="material-symbols-outlined">my_location</span>
+      </button>
+      <div style="width:1px;height:24px;background:var(--border);margin:0 4px"></div>
+      <button class="icon-btn" id="filterToggle" title="Filters">
+        <span class="material-symbols-outlined">tune</span>
+      </button>
+    </div>
+
+    <!-- Filter pills -->
+    <div class="filter-bar" id="filterBar" style="display:flex">
+      <div class="filter-pill glass">
+        <span class="material-symbols-outlined">local_car_wash</span>
+        <select id="filterBrand">
+          <option value="">All Brands</option>
+        </select>
+      </div>
+      <div class="filter-pill glass">
+        <span class="material-symbols-outlined">radio_button_checked</span>
+        <select id="filterRadius">
+          <option value="5">5 mi</option>
+          <option value="10" selected>10 mi</option>
+          <option value="25">25 mi</option>
+          <option value="50">50 mi</option>
+        </select>
+      </div>
+      <button class="search-here-btn" id="searchHereBtn">
+        <span class="material-symbols-outlined" style="font-size:16px">search</span> Search Here
+      </button>
+    </div>
+
+    <!-- Bottom preview card -->
+    <div class="bottom-card-container" id="bottomCard">
+      <div class="bottom-card glass" id="bottomCardInner">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div>
+            <div class="card-title" id="cardName">—</div>
+            <div class="card-meta">
+              <span class="material-symbols-outlined" style="font-size:16px">location_on</span>
+              <span id="cardAddr">—</span>
+            </div>
+          </div>
+          <button class="icon-btn" id="cardFavBtn" title="Add to favorites">
+            <span class="material-symbols-outlined" style="font-size:20px;color:#f43f5e">favorite</span>
+          </button>
+        </div>
+        <div class="card-badges" id="cardBadges"></div>
+        <div style="display:flex;gap:12px;margin-top:8px">
+          <button class="btn-primary-pill" id="cardDetailBtn">
+            <span class="material-symbols-outlined">info</span> View Details
+          </button>
+          <button class="fab-circle" title="Get Directions" id="cardNavBtn" style="flex-shrink:0">
+            <span class="material-symbols-outlined">directions</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- Legend -->
+    <div class="legend glass" id="legend">
+      <div class="legend-item">
+        <div class="legend-dot" style="background:var(--green)"></div>
+        < 10 min</div>
+          <div class="legend-item">
+            <div class="legend-dot" style="background:var(--yellow)"></div>10–20 min
+          </div>
+          <div class="legend-item">
+            <div class="legend-dot" style="background:var(--red)"></div>> 20 min
+          </div>
+          <div class="legend-item">
+            <div class="legend-dot" style="background:#94a3b8"></div>No data
+          </div>
+      </div>
+    </div>
+
+    <!-- ═══════ PAGE: FAVORITES ═══════ -->
+    <div class="page page-favorites" id="page-favorites">
+      <div class="fav-content">
+        <div class="fav-hero">
+          <div class="fav-label">
+            <span class="material-symbols-outlined" style="font-size:18px">favorite</span>
+            My Saved Locations
+          </div>
+          <h2 class="fav-title">Your Favorites</h2>
+          <p class="fav-sub" id="favSubtitle">Real-time wait times for your saved locations</p>
+          <div class="fav-stats">
+            <div>
+              <div class="fav-stat-label">Avg Wait</div>
+              <div class="fav-stat-val" id="favAvgWait">— min</div>
+            </div>
+            <div class="fav-stat-divider"></div>
+            <div>
+              <div class="fav-stat-label">Open Now</div>
+              <div class="fav-stat-val green" id="favOpenCount">—</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="fav-filters">
+          <button class="fav-filter-btn active" data-sort="distance">
+            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle">sort</span> Sort by
+            Distance
+          </button>
+          <button class="fav-filter-btn" data-sort="wait">Sort by Wait Time</button>
+          <button class="fav-filter-btn" data-sort="name">Alphabetical</button>
+        </div>
+
+        <div class="fav-grid" id="favGrid">
+          <!-- Cards injected by JS -->
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════ PAGE: DETAIL ═══════ -->
+    <div class="page page-detail" id="page-detail">
+      <div class="detail-content">
+        <button class="detail-back" id="detailBack">
+          <span class="material-symbols-outlined" style="font-size:18px">arrow_back</span> Back to Map
+        </button>
+        <div class="detail-top">
+          <div>
+            <h2 class="detail-name" id="detailName">—</h2>
+            <div class="detail-loc">
+              <span class="material-symbols-outlined" style="font-size:18px">location_on</span>
+              <span id="detailAddr">—</span>
+              <span style="color:#475569">•</span>
+              <span id="detailOpen" style="color:#22c55e;font-weight:500">Open</span>
+            </div>
+          </div>
+          <div class="detail-actions">
+            <button class="detail-action-btn" id="detailDirBtn">
+              <span class="material-symbols-outlined" style="font-size:20px">directions</span> Directions
+            </button>
+            <button class="detail-action-btn" id="detailShareBtn">
+              <span class="material-symbols-outlined" style="font-size:20px">share</span> Share
+            </button>
+          </div>
+        </div>
+
+        <div class="detail-grid">
+          <div class="detail-main">
+            <!-- Live Status Card -->
+            <div class="live-card" id="liveCard">
+              <div class="glow"></div>
+              <div class="live-header">
+                <div class="live-ping"><span class="ring"></span><span class="dot"></span></div>
+                <span class="live-status-label">Live Status</span>
+              </div>
+              <div class="live-body">
+                <div>
+                  <div class="live-big" id="liveCars">— Cars</div>
+                  <div class="live-sub">Currently in line</div>
+                </div>
+                <div style="text-align:right">
+                  <div class="live-wait-pill" id="liveSpeedPill">
+                    <span class="material-symbols-outlined">speed</span>
+                    <span id="liveSpeed">Fast Moving</span>
+                  </div>
+                  <div class="live-wait-big" style="margin-top:8px" id="liveWait">~10 min</div>
+                  <div class="live-wait-label">Estimated wait time</div>
+                </div>
+              </div>
+              <div class="live-progress">
+                <div class="live-progress-labels"><span>Empty</span><span>Moderate</span><span>Busy</span></div>
+                <div class="live-progress-track">
+                  <div class="live-progress-fill" id="liveProgressFill"
+                    style="width:20%;background:linear-gradient(90deg,#4ade80,#22c55e);box-shadow:0 0 10px rgba(74,222,128,0.5)">
+                  </div>
+                </div>
+                <div class="live-verified" id="liveVerified">
+                  <span class="material-symbols-outlined" style="font-size:16px">check_circle</span>
+                  Last verified 2m ago
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <div class="detail-sidebar">
+            <!-- Amenities -->
+            <div class="sidebar-card">
+              <h3>Amenities</h3>
+              <div class="amenity-grid" id="amenityGrid">
+                <div class="amenity-item"><span
+                    class="material-symbols-outlined">water_drop</span><span>Touchless</span></div>
+                <div class="amenity-item"><span
+                    class="material-symbols-outlined">cleaning_services</span><span>Vacuum</span></div>
+                <div class="amenity-item"><span class="material-symbols-outlined">shutter_speed</span><span>Wax</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════ PAGE: SETTINGS ═══════ -->
+  <div class="page page-settings" id="page-settings">
+    <div class="settings-content">
+      <div class="settings-hero">
+        <div class="settings-label">
+          <span class="material-symbols-outlined" style="font-size:18px">settings</span>
+          App Preferences
+        </div>
+        <h2 class="settings-title">Settings</h2>
+        <p class="settings-sub">Customize your WashWatch experience</p>
+      </div>
+
+      <div class="settings-section">
+        <h3 class="settings-section-title">
+          <span class="material-symbols-outlined">straighten</span>
+          Distance Units
+        </h3>
+        <div class="settings-option-group" id="distanceUnitGroup">
+          <button class="settings-option active" data-unit="mi">
+            <span class="material-symbols-outlined">social_distance</span>
+            <div>
+              <div class="option-title">Miles</div>
+              <div class="option-sub">Imperial system (mi)</div>
+            </div>
+            <span class="material-symbols-outlined check">check_circle</span>
+          </button>
+          <button class="settings-option" data-unit="km">
+            <span class="material-symbols-outlined">social_distance</span>
+            <div>
+              <div class="option-title">Kilometers</div>
+              <div class="option-sub">Metric system (km)</div>
+            </div>
+            <span class="material-symbols-outlined check">check_circle</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3 class="settings-section-title">
+          <span class="material-symbols-outlined">info</span>
+          About
+        </h3>
+        <div class="settings-about glass">
+          <div class="about-row"><span>Version</span><span>1.0.0</span></div>
+          <div class="about-row"><span>Theme</span><span>Dark</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════ Report Modal ═══════ -->
+  <div class="modal-overlay" id="reportModal">
+    <div class="modal-card">
+      <button class="modal-close" id="modalClose">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+      <div class="modal-icon">
+        <span class="material-symbols-outlined">local_car_wash</span>
+      </div>
+      <h2 class="modal-title">How long is the line?</h2>
+      <p class="modal-sub">Help fellow washers save time & earn 50 points!</p>
+      <div class="report-options">
+        <button class="report-btn green" data-minutes="0">
+          <div class="left">
+            <div class="btn-icon"><span class="material-symbols-outlined">speed</span></div>
+            <div>
+              <div class="btn-title">Empty</div>
+              <div class="btn-sub">0 min wait</div>
+            </div>
+          </div>
+          <span class="material-symbols-outlined arrow">arrow_forward_ios</span>
+        </button>
+        <button class="report-btn yellow" data-minutes="15">
+          <div class="left">
+            <div class="btn-icon"><span class="material-symbols-outlined">hourglass_top</span></div>
+            <div>
+              <div class="btn-title">Medium</div>
+              <div class="btn-sub">10–20 min wait</div>
+            </div>
+          </div>
+          <span class="material-symbols-outlined arrow">arrow_forward_ios</span>
+        </button>
+        <button class="report-btn red" data-minutes="35">
+          <div class="left">
+            <div class="btn-icon"><span class="material-symbols-outlined">traffic</span></div>
+            <div>
+              <div class="btn-title">Long</div>
+              <div class="btn-sub">30m+ wait</div>
+            </div>
+          </div>
+          <span class="material-symbols-outlined arrow">arrow_forward_ios</span>
+        </button>
+      </div>
+      <div class="modal-footer">
+        <span class="material-symbols-outlined" style="font-size:16px">verified_user</span>
+        Verified by community
+      </div>
+      <div class="gradient-bar"></div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/app.js"></script>
+</body>
+
+</html>
