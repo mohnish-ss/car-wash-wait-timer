@@ -2,10 +2,7 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import dotenv from "dotenv";
-import {
-  searchVenues,
-  mapBusynessToMinutes,
-} from "./besttime.service";
+import { searchVenues, mapBusynessToMinutes } from "./besttime.service";
 import { cleanAddress, detectBrandAndType } from "./utils";
 
 // ---------------------------------------------------------------------------
@@ -46,7 +43,11 @@ interface CachedCarWash {
   cachedAt: number;
 }
 
-/** venue_id → CachedCarWash */
+/**
+ * venue_id → CachedCarWash
+ * WARNING: In-memory cache is ephemeral on Vercel (serverless). It is wiped on cold starts and not shared between instances.
+ * For production, rely on BestTime API's internal caching or a persistent database.
+ */
 const carWashCache = new Map<string, CachedCarWash>();
 
 /** How long a cache entry is considered fresh (20 minutes) */
@@ -67,17 +68,13 @@ function computeCurrentWait(forecast: any): {
     return { busynessScore: 0, estimatedMinutes: -1 };
   }
 
-  // BestTime search returns forecast in different structures depending on the endpoint.
-  // Normalize: extract the array of days from whatever wrapper it's in.
+  // Normalize forecast structure
   let days: any[] | null = null;
-
   if (Array.isArray(forecast)) {
     days = forecast;
   } else if (forecast.analysis && Array.isArray(forecast.analysis)) {
     days = forecast.analysis;
   } else if (typeof forecast === "object") {
-    // Search endpoint may return { "Monday": {...}, "Tuesday": {...} } or nested structure
-    // Try to find an array property
     for (const key of Object.keys(forecast)) {
       if (Array.isArray(forecast[key])) {
         days = forecast[key];
@@ -85,7 +82,6 @@ function computeCurrentWait(forecast: any): {
       }
     }
   }
-
   if (!days || days.length === 0) {
     console.log(
       "  ⚠️  Forecast structure unrecognized:",
@@ -94,9 +90,34 @@ function computeCurrentWait(forecast: any): {
     return { busynessScore: 0, estimatedMinutes: -1 };
   }
 
-  const jsDay = new Date().getDay(); // 0 = Sun
-  const btDay = jsDay === 0 ? 6 : jsDay - 1; // BestTime: 0 = Mon, 6 = Sun
-  const currentHour = new Date().getHours();
+  // Get current day and hour in America/New_York
+  const now = new Date();
+  const tz = "America/New_York";
+  const dayFormatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    weekday: "long",
+  });
+  const hourFormatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hour: "numeric",
+    hour12: false,
+  });
+  const weekdayStr = dayFormatter.format(now); // e.g., "Monday"
+  const hourStr = hourFormatter.format(now); // e.g., "14"
+  const currentHour = parseInt(hourStr, 10);
+
+  // BestTime: 0 = Mon, 6 = Sun
+  const weekdayMap: Record<string, number> = {
+    Monday: 0,
+    Tuesday: 1,
+    Wednesday: 2,
+    Thursday: 3,
+    Friday: 4,
+    Saturday: 5,
+    Sunday: 6,
+  };
+  const btDay = weekdayMap[weekdayStr];
+  // BestTime's day_raw: index 0 = 6am, so offset by 6
   const dayRawIndex = (currentHour - 6 + 24) % 24;
 
   const dayData = days.find(
@@ -179,6 +200,46 @@ function venueToCarWash(
 
 // ---------------------------------------------------------------------------
 // Routes
+/**
+ * GET /api/debug/carwashes?lat=...&lng=...&radius=...
+ * Returns raw BestTime API results and cache state for debugging.
+ */
+app.get("/api/debug/carwashes", async (req, res) => {
+  try {
+    const lat = req.query.lat ? parseFloat(req.query.lat as string) : undefined;
+    const lng = req.query.lng ? parseFloat(req.query.lng as string) : undefined;
+    const radius = req.query.radius
+      ? parseInt(req.query.radius as string, 10)
+      : 5000;
+    if (lat === undefined || lng === undefined) {
+      return res.status(400).json({ error: "lat/lng required" });
+    }
+
+    // Fetch fresh data from BestTime
+    const venues = await searchVenues(lat, lng, radius, "car wash");
+
+    // Get cache state for this area
+    const bb = radiusToBoundingBox(lat, lng, radius);
+    const now = Date.now();
+    const cachedInArea = Array.from(carWashCache.values()).filter(
+      (cw) =>
+        cw.latitude >= bb.minLat &&
+        cw.latitude <= bb.maxLat &&
+        cw.longitude >= bb.minLng &&
+        cw.longitude <= bb.maxLng,
+    );
+
+    res.json({
+      venues,
+      cachedInArea,
+      cacheSize: carWashCache.size,
+      now: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("Debug endpoint error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 // ---------------------------------------------------------------------------
 
 /**
@@ -191,6 +252,12 @@ function venueToCarWash(
  */
 app.get("/api/carwashes", async (req, res) => {
   try {
+    res.setHeader(
+      "Cache-Control",
+      "no-store, no-cache, must-revalidate, proxy-revalidate",
+    );
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
     const lat = req.query.lat ? parseFloat(req.query.lat as string) : undefined;
     const lng = req.query.lng ? parseFloat(req.query.lng as string) : undefined;
     const radius = req.query.radius
@@ -323,8 +390,14 @@ app.get("/api/filters", (_req, res) => {
  * Returns a single car wash from cache with current wait time.
  */
 app.get("/api/carwashes/:id", (req, res) => {
-  const cw = carWashCache.get(req.params.id);
+  res.setHeader(
+    "Cache-Control",
+    "no-store, no-cache, must-revalidate, proxy-revalidate",
+  );
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
 
+  const cw = carWashCache.get(req.params.id);
   if (!cw) {
     return res.status(404).json({ error: "Car wash not found" });
   }
@@ -396,6 +469,7 @@ app.post("/api/carwashes/:id/report", (req, res) => {
  */
 app.get("/api/geocode", async (req, res) => {
   try {
+    res.set("Cache-Control", "no-store, max-age=0");
     const address = req.query.address as string;
     if (!address) {
       return res.status(400).json({ error: "address query param is required" });
