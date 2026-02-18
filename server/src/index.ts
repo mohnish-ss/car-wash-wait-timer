@@ -2,7 +2,10 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import dotenv from "dotenv";
-import { searchVenues, mapBusynessToMinutes } from "./besttime.service";
+import {
+  searchVenues,
+  mapBusynessToMinutes,
+} from "./besttime.service";
 import { cleanAddress, detectBrandAndType } from "./utils";
 
 // ---------------------------------------------------------------------------
@@ -60,7 +63,34 @@ function computeCurrentWait(forecast: any): {
   busynessScore: number;
   estimatedMinutes: number;
 } {
-  if (!forecast || !Array.isArray(forecast)) {
+  if (!forecast) {
+    return { busynessScore: 0, estimatedMinutes: -1 };
+  }
+
+  // BestTime search returns forecast in different structures depending on the endpoint.
+  // Normalize: extract the array of days from whatever wrapper it's in.
+  let days: any[] | null = null;
+
+  if (Array.isArray(forecast)) {
+    days = forecast;
+  } else if (forecast.analysis && Array.isArray(forecast.analysis)) {
+    days = forecast.analysis;
+  } else if (typeof forecast === "object") {
+    // Search endpoint may return { "Monday": {...}, "Tuesday": {...} } or nested structure
+    // Try to find an array property
+    for (const key of Object.keys(forecast)) {
+      if (Array.isArray(forecast[key])) {
+        days = forecast[key];
+        break;
+      }
+    }
+  }
+
+  if (!days || days.length === 0) {
+    console.log(
+      "  ⚠️  Forecast structure unrecognized:",
+      JSON.stringify(forecast).slice(0, 300),
+    );
     return { busynessScore: 0, estimatedMinutes: -1 };
   }
 
@@ -69,7 +99,7 @@ function computeCurrentWait(forecast: any): {
   const currentHour = new Date().getHours();
   const dayRawIndex = (currentHour - 6 + 24) % 24;
 
-  const dayData = forecast.find(
+  const dayData = days.find(
     (d: any) => d.day_info?.day_int === btDay || d.day_int === btDay,
   );
 
@@ -81,6 +111,14 @@ function computeCurrentWait(forecast: any): {
     };
   }
 
+  console.log(
+    "  ⚠️  No day_raw found. dayData keys:",
+    dayData ? Object.keys(dayData) : "no match",
+    "btDay:",
+    btDay,
+    "sample day:",
+    JSON.stringify(days[0]).slice(0, 200),
+  );
   return { busynessScore: 0, estimatedMinutes: -1 };
 }
 
@@ -215,6 +253,8 @@ app.get("/api/carwashes", async (req, res) => {
     } else {
       // ── Fetch fresh data from BestTime ──────────────────────────
       try {
+        // Venue Search with format=raw automatically forecasts each venue.
+        // venue_foot_traffic_forecast contains day_raw arrays when available.
         const venues = await searchVenues(lat, lng, radius, "car wash");
 
         for (const v of venues) {
@@ -229,6 +269,11 @@ app.get("/api/carwashes", async (req, res) => {
           carWashCache.set(v.venue_id, cw);
           results.push(cw);
         }
+
+        const withData = venues.filter((v) => v.has_forecast).length;
+        console.log(
+          `  📊 ${withData}/${venues.length} venues have foot traffic data`,
+        );
       } catch (err) {
         console.error("BestTime search failed:", err);
         // Fall back to any stale cache we have

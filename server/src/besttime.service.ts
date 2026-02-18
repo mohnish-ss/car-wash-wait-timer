@@ -29,7 +29,8 @@ export interface VenueSearchResult {
   venue_address: string;
   venue_lat: number;
   venue_lon: number;
-  forecast?: any; // If raw=true
+  forecast: any | null;
+  has_forecast: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -214,6 +215,7 @@ export async function searchVenues(
             venue_lat: v.venue_lat,
             venue_lon: v.venue_lon,
             forecast: v.venue_foot_traffic_forecast || null,
+            has_forecast: v.forecast === true,
           }));
         }
 
