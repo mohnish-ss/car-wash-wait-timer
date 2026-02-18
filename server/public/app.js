@@ -1,10 +1,10 @@
 /* ═══════════════════════════════════════════════════════════════
-   Flow SPA — app.js   (light theme)
+   WaitLess SPA — app.js   (light theme)
    ═══════════════════════════════════════════════════════════════ */
 
 let map, markers = [], allCarWashes = [], selectedWash = null, radiusCircle = null;
-const FAVORITES_KEY = 'flow_favorites';
-const SETTINGS_KEY = 'flow_settings';
+const FAVORITES_KEY = 'waitless_favorites';
+const SETTINGS_KEY = 'waitless_settings';
 
 /* ── Cookie helpers ─────────────────────────────────────────── */
 function setCookie(name, value, days = 365) {
@@ -46,9 +46,15 @@ function navigate(hash) {
     const target = document.getElementById('page-' + page);
     if (target) {
         target.classList.add('active');
-        document.querySelectorAll('.navbar nav a').forEach(a => {
-            a.classList.toggle('active', a.getAttribute('data-page') === page);
-        });
+        target.classList.add('active');
+        // Update both desktop and mobile navs
+        const setActive = (selector) => {
+            document.querySelectorAll(selector).forEach(a => {
+                a.classList.toggle('active', a.getAttribute('data-page') === page);
+            });
+        };
+        setActive('.navbar nav a');
+        setActive('.mobile-nav a');
     }
     if (page === 'favorites') renderFavorites();
     if (page === 'detail') {
@@ -77,11 +83,24 @@ function getWaitInfo(wash) {
     const logs = wash.waitTimeLogs || [];
     const recent = logs.length ? logs[logs.length - 1] : null;
     const mins = recent ? recent.estimatedMinutes : -1;
-    let color = '#94a3b8', cls = '', label = 'No data', speed = 'Unknown';
-    if (mins >= 0 && mins < 10) { color = '#22c55e'; cls = 'green'; label = mins + ' min'; speed = 'Fast Moving'; }
-    else if (mins >= 10 && mins <= 20) { color = '#eab308'; cls = 'yellow'; label = mins + ' min'; speed = 'Moderate'; }
-    else if (mins > 20) { color = '#ef4444'; cls = 'red'; label = mins + ' min'; speed = 'Slow'; }
-    return { color, cls, label, mins, speed };
+    let color = '#94a3b8', cls = 'gray', label = 'No data', speed = 'Unknown';
+    // Extended properties for detail view to avoid duplication
+    let gradient = ['#94a3b8', '#64748b'];
+    let shadow = '96,165,250'; // Default blue-ish shadow for empty state if needed
+
+    if (mins >= 0 && mins < 10) {
+        color = '#22c55e'; cls = 'green'; label = mins + ' min'; speed = 'Fast Moving';
+        gradient = ['#4ade80', '#22c55e']; shadow = '74,222,128';
+    }
+    else if (mins >= 10 && mins <= 20) {
+        color = '#eab308'; cls = 'yellow'; label = mins + ' min'; speed = 'Moderate';
+        gradient = ['#fbbf24', '#f59e0b']; shadow = '251,191,36';
+    }
+    else if (mins > 20) {
+        color = '#ef4444'; cls = 'red'; label = mins + ' min'; speed = 'Slow';
+        gradient = ['#f87171', '#ef4444']; shadow = '248,113,113';
+    }
+    return { color, cls, label, mins, speed, gradient, shadow };
 }
 
 /* ── Map ────────────────────────────────────────────────────── */
@@ -352,20 +371,31 @@ function showDetail(id) {
     document.getElementById('liveSpeed').textContent = info.speed;
     document.getElementById('liveWait').textContent = info.mins >= 0 ? '~' + info.mins + ' min' : '— min';
 
+    document.getElementById('liveWait').textContent = info.mins >= 0 ? '~' + info.mins + ' min' : '— min';
+
     const pct = info.mins >= 0 ? Math.min(100, (info.mins / 40) * 100) : 0;
     const fill = document.getElementById('liveProgressFill');
     fill.style.width = pct + '%';
-    const colors = { green: ['#4ade80', '#22c55e', '74,222,128'], yellow: ['#fbbf24', '#f59e0b', '251,191,36'], red: ['#f87171', '#ef4444', '248,113,113'] };
-    const c = colors[info.cls] || colors.green;
-    fill.style.background = `linear-gradient(90deg,${c[0]},${c[1]})`;
-    fill.style.boxShadow = `0 0 10px rgba(${c[2]},0.5)`;
+
+    // Use centralized colors
+    if (info.gradient) {
+        fill.style.background = `linear-gradient(90deg,${info.gradient[0]},${info.gradient[1]})`;
+        fill.style.boxShadow = `0 0 10px rgba(${info.shadow},0.5)`;
+    }
 
     const pill = document.getElementById('liveSpeedPill');
-    const pillColor = info.cls === 'red' ? '#f87171' : info.cls === 'yellow' ? '#fbbf24' : '#4ade80';
-    const pillBg = info.cls === 'red' ? 'rgba(239,68,68,0.1)' : info.cls === 'yellow' ? 'rgba(234,179,8,0.1)' : 'rgba(34,197,94,0.1)';
-    pill.style.background = pillBg;
-    pill.style.borderColor = pillColor.replace(')', ',0.2)').replace('rgb', 'rgba');
-    pill.querySelectorAll('span').forEach(s => s.style.color = pillColor);
+    // Map cls to pill styles
+    const pillStyles = {
+        red: { bg: 'rgba(239,68,68,0.1)', color: '#f87171' },
+        yellow: { bg: 'rgba(234,179,8,0.1)', color: '#fbbf24' },
+        green: { bg: 'rgba(34,197,94,0.1)', color: '#4ade80' },
+        gray: { bg: 'rgba(148,163,184,0.1)', color: '#94a3b8' }
+    };
+    const style = pillStyles[info.cls] || pillStyles.gray;
+
+    pill.style.background = style.bg;
+    pill.style.borderColor = style.bg.replace('0.1)', '0.2)');
+    pill.querySelectorAll('span').forEach(s => s.style.color = style.color);
 
     document.getElementById('detailDirBtn').onclick = () => window.open(`https://www.google.com/maps/dir/?api=1&destination=${wash.latitude},${wash.longitude}`);
     document.getElementById('detailShareBtn').onclick = () => { if (navigator.share) navigator.share({ title: wash.name, url: location.href }); };
@@ -439,14 +469,14 @@ async function init() {
                 hideLoading();
                 map.setView([37.7749, -122.4194], 14);
             },
-            { timeout: 5000 }
+            { timeout: 2000 }
         );
     } else {
         hideLoading();
     }
 
-    // Failsafe: always hide loading after 4s max
-    setTimeout(hideLoading, 4000);
+    // Failsafe: always hide loading after 0.9s max
+    setTimeout(hideLoading, 900);
 
     navigate(location.hash || '#map');
 }

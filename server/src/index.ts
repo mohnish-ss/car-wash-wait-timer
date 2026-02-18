@@ -17,6 +17,26 @@ const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
+app.use(express.json());
+
+// ── Production: Strip mock data scripts ──────────────────────────
+app.get("/", (req, res, next) => {
+  if (process.env.NODE_ENV === "production") {
+    const fs = require("fs");
+    const indexHtml = path.join(__dirname, "../public/index.html");
+    fs.readFile(indexHtml, "utf8", (err: any, data: string) => {
+      if (err) return next(); // Fallback to static
+      // Remove mock scripts
+      const cleanHtml = data
+        .replace('<script src="/mock-carwashes.js"></script>', "")
+        .replace('<script src="/mock-api-integration.js"></script>', "");
+      res.send(cleanHtml);
+    });
+  } else {
+    next(); // In dev, let express.static handle it (serves file as-is)
+  }
+});
+
 app.use(express.static(path.join(__dirname, "../public")));
 
 // ---------------------------------------------------------------------------
@@ -198,6 +218,32 @@ function venueToCarWash(
   };
 }
 
+/**
+ * Calculate distance between two points in meters using Haversine formula.
+ */
+function getDistanceFromLatLonInMeters(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number,
+) {
+  const R = 6371e3; // Radius of the earth in meters
+  const dLat = deg2rad(lat2 - lat1);
+  const dLon = deg2rad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(deg2rad(lat1)) *
+      Math.cos(deg2rad(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function deg2rad(deg: number) {
+  return deg * (Math.PI / 180);
+}
+
 // ---------------------------------------------------------------------------
 // Routes
 /**
@@ -347,6 +393,19 @@ app.get("/api/carwashes", async (req, res) => {
         results = cachedInArea;
       }
     }
+
+    // ── Strict Radius Filtering ──────────────────────────────────
+    // Bounding box (used above) is square, so corners are > radius.
+    // We filter strictly by distance here.
+    results = results.filter((cw) => {
+      const dist = getDistanceFromLatLonInMeters(
+        lat,
+        lng,
+        cw.latitude,
+        cw.longitude,
+      );
+      return dist <= radius;
+    });
 
     // ── Filter out hand-wash / detailers ──────────────────────────
     let filtered = results.filter((cw) => {

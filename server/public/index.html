@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Flow — Car Wash Wait Times</title>
+  <title>WaitLess — Car Wash Wait Times</title>
   <meta name="description" content="Find nearby car washes and check real-time wait times" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -21,15 +21,15 @@
   <!-- ═══════ Loading Overlay ═══════ -->
   <div class="loading-overlay" id="loadingOverlay">
     <div class="loading-spinner"></div>
-    <p>Flow</p>
+    <p>WaitLess</p>
     <span class="sub">Finding nearby car washes…</span>
   </div>
 
   <!-- ═══════ Navbar ═══════ -->
   <header class="navbar" id="navbar">
     <a class="logo" href="#map">
-      <div class="logo-icon"><span class="material-symbols-outlined">local_car_wash</span></div>
-      <span class="logo-text">Flow</span>
+      <div class="logo-icon"><span class="material-symbols-outlined">hourglass_empty</span></div>
+      <span class="logo-text">WaitLess</span>
     </a>
     <nav>
       <a href="#map" class="active" data-page="map"><span class="material-symbols-outlined"
@@ -97,15 +97,17 @@
           </button>
         </div>
         <div class="card-badges" id="cardBadges"></div>
-        <div style="display:flex;gap:12px;margin-top:8px">
-          <button class="btn-primary-pill" id="cardDetailBtn">
-            <span class="material-symbols-outlined">info</span> View Details
-          </button>
+        <div class="card-actions">
+          <div class="action-row">
+            <button class="btn-primary-pill" id="cardDetailBtn">
+              <span class="material-symbols-outlined">info</span> View Details
+            </button>
+            <button class="fab-circle" title="Get Directions" id="cardNavBtn" style="flex-shrink:0">
+              <span class="material-symbols-outlined">directions</span>
+            </button>
+          </div>
           <button class="btn-report-pill" id="cardReportBtn">
             <span class="material-symbols-outlined">edit_note</span> Report Wait
-          </button>
-          <button class="fab-circle" title="Get Directions" id="cardNavBtn" style="flex-shrink:0">
-            <span class="material-symbols-outlined">directions</span>
           </button>
         </div>
       </div>
@@ -261,7 +263,7 @@
           App Preferences
         </div>
         <h2 class="settings-title">Settings</h2>
-        <p class="settings-sub">Customize your WashWatch experience</p>
+        <p class="settings-sub">Customize your WaitLess experience</p>
       </div>
 
       <div class="settings-section">
@@ -289,16 +291,6 @@
         </div>
       </div>
 
-      <div class="settings-section">
-        <h3 class="settings-section-title">
-          <span class="material-symbols-outlined">info</span>
-          About
-        </h3>
-        <div class="settings-about glass">
-          <div class="about-row"><span>Version</span><span>1.0.0</span></div>
-          <div class="about-row"><span>Theme</span><span>Dark</span></div>
-        </div>
-      </div>
     </div>
   </div>
 
@@ -353,7 +345,26 @@
     </div>
   </div>
 
+  <!-- ═══════ Mobile Bottom Nav ═══════ -->
+  <nav class="mobile-nav glass" id="mobileNav">
+    <a href="#map" data-page="map">
+      <span class="material-symbols-outlined">map</span>
+      <span>Map</span>
+    </a>
+    <a href="#favorites" data-page="favorites">
+      <span class="material-symbols-outlined">favorite</span>
+      <span>Favorites</span>
+    </a>
+    <a href="#settings" data-page="settings">
+      <span class="material-symbols-outlined">settings</span>
+      <span>Settings</span>
+    </a>
+  </nav>
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Mock data for development -->
+  <script src="/mock-carwashes.js"></script>
+  <script src="/mock-api-integration.js"></script>
   <script src="/app.js"></script>
 </body>
 
