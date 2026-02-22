@@ -152,86 +152,46 @@ export async function searchVenues(
   radius: number, // meters
   query: string = "car wash",
 ): Promise<VenueSearchResult[]> {
-  if (!API_KEY) {
-    console.warn("⚠️  BESTTIME_API_KEY not set – skipping venue search");
-    return [];
-  }
-
   try {
-    // 1. Start the search job
-    const response = await axios.post(`${BASE_URL}/venues/search`, null, {
-      params: {
-        api_key_private: API_KEY,
-        q: query,
-        lat,
-        lng,
-        radius,
-        format: "raw", // Get raw forecast data immediately
-        num: 20, // Max 20 per page (1 credit cost)
+    const opQuery = `[out:json][timeout:10];(node["amenity"="car_wash"](around:${radius},${lat},${lng});way["amenity"="car_wash"](around:${radius},${lat},${lng});relation["amenity"="car_wash"](around:${radius},${lat},${lng}););out center;`;
+
+    const response = await axios.post(
+      "https://overpass-api.de/api/interpreter",
+      `data=${encodeURIComponent(opQuery)}`,
+      {
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
       },
-    });
-
-    const data = response.data;
-    if (data.status !== "OK" || !data.job_id) {
-      console.log(
-        `  ❌ BestTime search init failed: ${data.message || "unknown"}`,
-      );
-      return [];
-    }
-
-    const jobId = data.job_id;
-    const collectionId = data.collection_id;
-    console.log(
-      `  ⏳ BestTime search job started (ID: ${jobId}). Polling for results...`,
     );
 
-    // 2. Poll for results
-    // Iterate for max 20 seconds (10 attempts * 2s)
-    for (let i = 0; i < 10; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 2000)); // wait 2s
+    const elements = response.data?.elements || [];
+    console.log(
+      `  ✅ Overpass search finished. Found ${elements.length} venues.`,
+    );
 
-      try {
-        const progressRes = await axios.get(`${BASE_URL}/venues/progress`, {
-          params: {
-            job_id: jobId,
-            collection_id: collectionId,
-            format: "raw",
-          },
-        });
-
-        const pData = progressRes.data;
-
-        // Check if finished
-        if (pData.job_finished) {
-          const venues = (pData.venues || []) as any[];
-          console.log(
-            `  ✅ BestTime search finished. Found ${venues.length} venues.`,
-          );
-
-          return venues.map((v: any) => ({
-            venue_id: v.venue_id,
-            venue_name: v.venue_name,
-            venue_address: v.venue_address,
-            venue_lat: v.venue_lat,
-            venue_lon: v.venue_lon,
-            forecast: v.venue_foot_traffic_forecast || null,
-            has_forecast: v.forecast === true,
-          }));
-        }
-
-        console.log(`     ... polling attempt ${i + 1}/10`);
-      } catch (pollErr) {
-        console.warn("     Polling error (retrying):", pollErr);
-      }
-    }
-
-    console.warn("  ⚠️  BestTime search timed out after 20s.");
-    return [];
+    return elements.map((e: any) => {
+      const vLat = e.lat || e.center?.lat;
+      const vLon = e.lon || e.center?.lon;
+      const vName = e.tags?.name || "Car Wash";
+      const vAddress =
+        [
+          e.tags?.["addr:housenumber"],
+          e.tags?.["addr:street"],
+          e.tags?.["addr:city"],
+        ]
+          .filter(Boolean)
+          .join(", ") || "";
+      return {
+        venue_id: `op_${e.id}`, // Custom pseudo ID
+        venue_name: vName,
+        venue_address: vAddress,
+        venue_lat: vLat,
+        venue_lon: vLon,
+        forecast: null,
+        has_forecast: false,
+      };
+    });
   } catch (error: any) {
-    const msg = error.response?.data?.message
-      ? JSON.stringify(error.response.data.message)
-      : error.message;
-    console.error(`  ❌ BestTime searchVenues error: ${msg}`);
+    console.error("Overpass search error:", error.message);
     return [];
   }
 }

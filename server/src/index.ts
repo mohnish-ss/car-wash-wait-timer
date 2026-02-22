@@ -2,7 +2,11 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import dotenv from "dotenv";
-import { searchVenues, mapBusynessToMinutes } from "./besttime.service";
+import {
+  searchVenues,
+  mapBusynessToMinutes,
+  identifyVenue,
+} from "./besttime.service";
 import { cleanAddress, detectBrandAndType } from "./utils";
 
 // ---------------------------------------------------------------------------
@@ -464,6 +468,56 @@ app.get("/api/carwashes/:id", (req, res) => {
           ]
         : [],
   });
+});
+
+/**
+ * GET /api/carwashes/:id/live
+ * Find missing forecast data for a venue and re-cache it.
+ */
+app.get("/api/carwashes/:id/live", async (req, res) => {
+  try {
+    const cw = carWashCache.get(req.params.id);
+    if (!cw) return res.status(404).json({ error: "Not found" });
+
+    // If no forecast, fetch it from BestTime
+    if (!cw.forecast) {
+      const addressQuery = cw.address || `${cw.latitude}, ${cw.longitude}`;
+      const ident = await identifyVenue(cw.name, addressQuery);
+
+      if (ident && ident.forecast) {
+        cw.forecast = ident.forecast;
+      } else {
+        cw.forecast = { error: true }; // Cache the failure so we don't retry
+      }
+
+      // Retain original OSM ID in cache so frontend can still find it
+      // Or swap to BestTime ID if preferred, but we'll just keep the original as the primary key.
+      carWashCache.set(cw.id, cw);
+    }
+
+    const { busynessScore, estimatedMinutes } = computeCurrentWait(cw.forecast);
+    const nowIso = new Date().toISOString();
+    const { forecast, cachedAt, ...rest } = cw;
+    return res.json({
+      ...rest,
+      waitTimeLogs:
+        estimatedMinutes >= 0
+          ? [
+              {
+                id: `log_${cw.id}`,
+                carWashId: cw.id,
+                timestamp: nowIso,
+                busynessScore,
+                isLive: false,
+                estimatedMinutes,
+              },
+            ]
+          : [],
+    });
+  } catch (error) {
+    console.error("Live fetch error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 /**

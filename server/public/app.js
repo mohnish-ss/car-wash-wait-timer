@@ -142,13 +142,42 @@ function plotMarkers(washes) {
     });
 }
 
-function selectMarker(wash, marker) {
+async function selectMarker(wash, marker) {
     selectedWash = wash;
     markers.forEach(m => {
         const info = getWaitInfo(m.carWash);
         m.setIcon(createDotIcon(info.color, m === marker));
     });
     showBottomCard(wash);
+
+    // Lazy load forecast if no wait data
+    const info = getWaitInfo(wash);
+    if (info.mins < 0 && !wash._liveFetched) {
+        wash._liveFetched = true;
+        try {
+            const bdg = document.getElementById('cardBadges');
+            if (bdg) bdg.innerHTML = '<div class="badge badge-info"><span class="material-symbols-outlined" style="animation:spin 1s linear infinite">progress_activity</span>Loading wait time...</div>' + bdg.innerHTML;
+
+            const res = await fetch(`/api/carwashes/${wash.id}/live`);
+            if (res.ok) {
+                const updatedWash = await res.json();
+                Object.assign(wash, updatedWash); // update in place
+                wash._liveFetched = true;
+            } else {
+                console.error("Failed to load live wait time", await res.text());
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            if (selectedWash === wash) {
+                markers.forEach(m => {
+                    const i = getWaitInfo(m.carWash);
+                    m.setIcon(createDotIcon(i.color, m.carWash === wash));
+                });
+                showBottomCard(wash);
+            }
+        }
+    }
 }
 
 function showBottomCard(wash) {
