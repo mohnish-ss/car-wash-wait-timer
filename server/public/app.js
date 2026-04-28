@@ -203,6 +203,8 @@ function showBottomCard(wash) {
         badges.appendChild(b);
     }
     document.getElementById('bottomCard').classList.add('visible');
+    const isFav = isFavorite(wash.id);
+    document.querySelector('#cardFavBtn .material-symbols-outlined').style.fontVariationSettings = isFav ? "'FILL' 1" : "'FILL' 0";
     map.flyTo([wash.latitude, wash.longitude], 15, { duration: 0.8 });
 }
 
@@ -439,6 +441,15 @@ function showDetail(id) {
     pill.style.borderColor = style.bg.replace('0.1)', '0.2)');
     pill.querySelectorAll('span').forEach(s => s.style.color = style.color);
 
+    const verifiedDiv = document.getElementById('liveVerified');
+    if (wash.dataSource === 'community' && wash.verifiedAt) {
+        const minsAgo = Math.max(0, Math.floor((new Date() - new Date(wash.verifiedAt)) / 60000));
+        verifiedDiv.style.display = 'flex';
+        verifiedDiv.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px; margin-right:4px;">check_circle</span> Verified by community ${minsAgo}m ago`;
+    } else {
+        verifiedDiv.style.display = 'none';
+    }
+
     document.getElementById('detailDirBtn').onclick = () => window.open(`https://www.google.com/maps/dir/?api=1&destination=${wash.latitude},${wash.longitude}`);
     document.getElementById('detailShareBtn').onclick = () => { if (navigator.share) navigator.share({ title: wash.name, url: location.href }); };
     document.getElementById('detailBack').onclick = () => { location.hash = '#map'; };
@@ -472,7 +483,8 @@ document.querySelectorAll('.report-btn').forEach(btn => {
                         busynessScore: Math.round(mins * 4),
                         isLive: false,
                         estimatedMinutes: mins
-                    }];
+                    updated.dataSource = 'community';
+                    updated.verifiedAt = new Date().toISOString();
                     plotMarkers(allCarWashes);
                     showBottomCard(updated);
                 }

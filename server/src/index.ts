@@ -18,6 +18,7 @@ import {
   getVenueById,
   getVenuesInBoundingBox,
   isForecastFresh,
+  updateCommunityWait,
   DBVenue,
 } from "./database";
 
@@ -52,7 +53,8 @@ interface CarWashResponse {
     estimatedMinutes: number;
     isClosed: boolean;
   }>;
-  dataSource: "forecast" | "live";
+  dataSource: "forecast" | "live" | "community";
+  verifiedAt?: string | null;
 }
 
 function computeCurrentWait(forecast: any): {
@@ -150,6 +152,20 @@ function formatResponse(venue: DBVenue): CarWashResponse {
   const { busynessScore, estimatedMinutes, isClosed } = computeCurrentWait(forecast);
   const nowIso = new Date().toISOString();
 
+  let finalMins = estimatedMinutes;
+  let finalBusyness = busynessScore;
+  let dataSource: "forecast" | "live" | "community" = "forecast";
+  let verifiedAt: string | null = null;
+  
+  if (venue.community_wait_updated_at && venue.community_wait_minutes !== null) {
+      if (Date.now() - venue.community_wait_updated_at < 2 * 60 * 60 * 1000) {
+          finalMins = venue.community_wait_minutes;
+          finalBusyness = Math.min(100, Math.round(finalMins * 4));
+          dataSource = "community";
+          verifiedAt = new Date(venue.community_wait_updated_at).toISOString();
+      }
+  }
+
   return {
     id: venue.id,
     name: venue.name,
@@ -158,16 +174,17 @@ function formatResponse(venue: DBVenue): CarWashResponse {
     longitude: venue.longitude,
     brand: venue.brand,
     washType: venue.wash_type,
-    waitTimeLogs: estimatedMinutes >= 0 ? [{
+    waitTimeLogs: finalMins >= 0 ? [{
       id: `log_${venue.id}`,
       carWashId: venue.id,
-      timestamp: nowIso,
-      busynessScore,
-      isLive: false,
-      estimatedMinutes,
+      timestamp: verifiedAt || nowIso,
+      busynessScore: finalBusyness,
+      isLive: dataSource !== "forecast",
+      estimatedMinutes: finalMins,
       isClosed,
     }] : [],
-    dataSource: "forecast",
+    dataSource,
+    verifiedAt,
   };
 }
 
@@ -359,6 +376,8 @@ app.post("/api/carwashes/:id/report", (req, res) => {
   }
 
   const busynessScore = Math.min(100, Math.round(estimatedMinutes * 4));
+  
+  updateCommunityWait(venue.id, estimatedMinutes);
   
   // Update live cache
   const cacheKey = `live_${venue.id}`;

@@ -13,6 +13,8 @@ export interface DBVenue {
   wash_type: string | null;
   forecast_json: string | null; // stored as JSON string
   forecast_updated_at: number | null; // Unix timestamp
+  community_wait_minutes: number | null;
+  community_wait_updated_at: number | null;
   created_at: number; // Unix timestamp
 }
 
@@ -39,11 +41,16 @@ export function initDatabase() {
       wash_type TEXT,
       forecast_json TEXT,
       forecast_updated_at INTEGER,
+      community_wait_minutes INTEGER,
+      community_wait_updated_at INTEGER,
       created_at INTEGER NOT NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_venues_lat_lng ON venues(latitude, longitude);
   `);
+  
+  try { db.exec("ALTER TABLE venues ADD COLUMN community_wait_minutes INTEGER"); } catch(e) {}
+  try { db.exec("ALTER TABLE venues ADD COLUMN community_wait_updated_at INTEGER"); } catch(e) {}
 }
 
 /**
@@ -139,6 +146,20 @@ export function isForecastFresh(venue: DBVenue | null, ttlMs: number): boolean {
     return false;
   }
   return (Date.now() - venue.forecast_updated_at) < ttlMs;
+}
+
+/**
+ * Update the community reported wait time for a venue.
+ */
+export function updateCommunityWait(id: string, mins: number): void {
+  const now = Date.now();
+  const stmt = db.prepare(`
+    UPDATE venues SET 
+      community_wait_minutes = ?, 
+      community_wait_updated_at = ? 
+    WHERE id = ?
+  `);
+  stmt.run(mins, now, id);
 }
 
 // Initialize tables on import
