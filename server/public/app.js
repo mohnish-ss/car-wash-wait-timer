@@ -82,6 +82,12 @@ function toggleFavorite(id) {
 function getWaitInfo(wash) {
     const logs = wash.waitTimeLogs || [];
     const recent = logs.length ? logs[logs.length - 1] : null;
+
+    // Handle Closed status directly
+    if (recent && recent.isClosed) {
+        return { color: '#64748b', cls: 'gray', label: 'Closed', mins: -1, speed: 'Currently Closed', gradient: ['#475569', '#334155'], shadow: '71,85,105' };
+    }
+
     const mins = recent ? recent.estimatedMinutes : -1;
     let color = '#94a3b8', cls = 'gray', label = 'No data', speed = 'Unknown';
     // Extended properties for detail view to avoid duplication
@@ -152,11 +158,11 @@ async function selectMarker(wash, marker) {
 
     // Lazy load forecast if no wait data
     const info = getWaitInfo(wash);
-    if (info.mins < 0 && !wash._liveFetched) {
+    if (info.mins < 0 && !wash._liveFetched && info.label !== 'Closed') {
         wash._liveFetched = true;
         try {
             const bdg = document.getElementById('cardBadges');
-            if (bdg) bdg.innerHTML = '<div class="badge badge-info"><span class="material-symbols-outlined" style="animation:spin 1s linear infinite">progress_activity</span>Loading wait time...</div>' + bdg.innerHTML;
+            if (bdg) bdg.innerHTML = '<div class="badge badge-info" id="liveLoadingBadge"><span class="material-symbols-outlined" style="animation:spin 1s linear infinite">progress_activity</span>Loading live wait time...</div>' + bdg.innerHTML;
 
             const res = await fetch(`/api/carwashes/${wash.id}/live`);
             if (res.ok) {
@@ -347,7 +353,7 @@ function renderFavorites() {
         <div class="overlay"></div>
         <div class="wait-badge ${info.cls || 'gray'}">
           <span class="dot" style="background:${info.color}"></span>
-          ${info.mins >= 0 ? 'LIVE WAIT: ' + info.label.toUpperCase() : 'NO DATA'}
+          ${info.label === 'Closed' ? 'CLOSED' : (info.mins >= 0 ? 'LIVE WAIT: ' + info.label.toUpperCase() : 'NO DATA')}
         </div>
         <button class="fav-heart" data-id="${w.id}">
           <span class="material-symbols-outlined" style="font-size:20px;font-variation-settings:'FILL' 1">favorite</span>
@@ -395,11 +401,18 @@ function showDetail(id) {
 
     document.getElementById('detailName').textContent = wash.name;
     document.getElementById('detailAddr').textContent = wash.address || '';
+    
+    if (info.label === 'Closed') {
+        document.getElementById('detailOpen').textContent = 'Closed';
+        document.getElementById('detailOpen').style.color = '#ef4444';
+    } else {
+        document.getElementById('detailOpen').textContent = 'Open';
+        document.getElementById('detailOpen').style.color = '#22c55e';
+    }
+
     const carsEst = info.mins >= 0 ? Math.max(1, Math.round(info.mins / 3)) : '—';
     document.getElementById('liveCars').textContent = (carsEst === '—' ? '—' : carsEst + ' Cars');
     document.getElementById('liveSpeed').textContent = info.speed;
-    document.getElementById('liveWait').textContent = info.mins >= 0 ? '~' + info.mins + ' min' : '— min';
-
     document.getElementById('liveWait').textContent = info.mins >= 0 ? '~' + info.mins + ' min' : '— min';
 
     const pct = info.mins >= 0 ? Math.min(100, (info.mins / 40) * 100) : 0;

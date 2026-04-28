@@ -31,3 +31,6 @@ mobile/.expo/
 mobile/ios/
 mobile/android/
 .vercel
+*.db
+*.db-shm
+*.db-wal
