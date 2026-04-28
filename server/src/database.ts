@@ -16,7 +16,10 @@ export interface DBVenue {
   created_at: number; // Unix timestamp
 }
 
-const dbPath = path.resolve(__dirname, "../../venues.db");
+const isVercel = process.env.VERCEL === "1";
+const dbPath = isVercel 
+  ? path.join("/tmp", "venues.db")
+  : path.resolve(__dirname, "../../venues.db");
 const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
 
