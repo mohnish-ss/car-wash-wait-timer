@@ -483,6 +483,7 @@ document.querySelectorAll('.report-btn').forEach(btn => {
                         busynessScore: Math.round(mins * 4),
                         isLive: false,
                         estimatedMinutes: mins
+                    }];
                     updated.dataSource = 'community';
                     updated.verifiedAt = new Date().toISOString();
                     plotMarkers(allCarWashes);
