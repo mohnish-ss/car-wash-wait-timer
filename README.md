@@ -1,5 +1,7 @@
 # WaitLess - Car Wash Wait Times
 
+**Live App:** [https://carwash-wait-time.vercel.app/#map](https://carwash-wait-time.vercel.app/#map)
+
 Real-time car wash wait time estimates powered by [BestTime.app](https://besttime.app) foot traffic forecasts.
 
 ## Features
