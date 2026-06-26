@@ -1,4 +1,4 @@
-# Flow — Car Wash Wait Times
+# WaitLess - Car Wash Wait Times
 
 Real-time car wash wait time estimates powered by [BestTime.app](https://besttime.app) foot traffic forecasts.
 
