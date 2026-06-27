@@ -9,36 +9,9 @@ const http1Agent = new https.Agent({ });
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
-const API_KEY = process.env.BESTTIME_API_KEY || "";
-const BASE_URL = "https://besttime.app/api/v1";
-const BESTTIME_TIMEOUT_MS = 8000;
-
-function isTransientBestTimeError(error: any): boolean {
-  const status = error.response?.status;
-  return (
-    !error.response ||
-    error.code === "ECONNABORTED" ||
-    error.code === "ETIMEDOUT" ||
-    status === 408 ||
-    status === 429 ||
-    status >= 500
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export interface VenueIdentification {
-  venueId: string;
-  forecast: any; // raw 7-day forecast JSON
-}
-
-export interface LiveBusyness {
-  liveScore: number; // 0-100
-  forecastedScore: number; // what it usually is at this time
-  isLive: boolean;
-}
 
 export interface VenueSearchResult {
   venue_id: string;
@@ -51,123 +24,9 @@ export interface VenueSearchResult {
   osm_opening_hours?: string | null;
 }
 
-// ---------------------------------------------------------------------------
-// BestTime API Service
-// ---------------------------------------------------------------------------
-
-/**
- * POST /forecasts — Identify a venue and get its 7-day forecast.
- * BestTime uses QUERY PARAMS, not JSON body.
- * Returns the venue_id (needed for future live calls) + the raw forecast.
- * Costs 1 credit per new venue.
- */
-export async function identifyVenue(
-  name: string,
-  address: string,
-): Promise<VenueIdentification | null> {
-  if (!API_KEY) {
-    console.warn(
-      "⚠️  BESTTIME_API_KEY not set – skipping venue identification",
-    );
-    return null;
-  }
-
-  try {
-	    const response = await axios.post(`${BASE_URL}/forecasts`, null, {
-	      params: {
-	        api_key_private: API_KEY,
-	        venue_name: name,
-	        venue_address: address,
-	      },
-	      timeout: BESTTIME_TIMEOUT_MS,
-	    });
-
-    const data = response.data;
-
-    if (data.status !== "OK" || !data.venue_info?.venue_id) {
-      console.log(
-        `  ❌ BestTime could not identify "${name}" at "${address}": ${data.message || "unknown"}`,
-      );
-      return null;
-    }
-
-    const venueId = data.venue_info.venue_id;
-    const forecast = data.analysis || null;
-
-    console.log(`  ✅ Identified "${name}" → venue_id: ${venueId}`);
-    return { venueId, forecast };
-	  } catch (error: any) {
-	    const msg = error.response?.data?.message
-	      ? JSON.stringify(error.response.data.message)
-	      : error.message;
-	    console.error(`  ❌ BestTime identifyVenue error for "${name}": ${msg}`);
-	    if (isTransientBestTimeError(error)) {
-	      throw error;
-	    }
-	    return null;
-	  }
-}
-
-/**
- * POST /forecasts/live — Get real-time busyness for a venue.
- * Can use venue_id (recommended) or name+address.
- * Costs 1 credit per call.
- */
-export async function getLiveBusyness(
-  venueId: string,
-): Promise<LiveBusyness | null> {
-  if (!API_KEY) {
-    console.warn("⚠️  BESTTIME_API_KEY not set – skipping live busyness");
-    return null;
-  }
-
-  try {
-	    const response = await axios.post(`${BASE_URL}/forecasts/live`, null, {
-	      params: {
-	        api_key_private: API_KEY,
-	        venue_id: venueId,
-	      },
-	      timeout: BESTTIME_TIMEOUT_MS,
-	    });
-
-    const data = response.data;
-
-    if (data.status !== "OK") {
-      console.log(
-        `  ⚠️  No live data for venue ${venueId}: ${data.message || "unknown"}`,
-      );
-      return null;
-    }
-
-    const analysis = data.analysis || {};
-    const liveScore = Math.max(
-      0,
-      Math.min(100, analysis.venue_live_busyness ?? 0),
-    );
-    const forecastedScore = Math.max(
-      0,
-      Math.min(100, analysis.venue_forecasted_busyness ?? 0),
-    );
-
-    return {
-      liveScore,
-      forecastedScore,
-      isLive: analysis.venue_live_busyness_available === true,
-    };
-  } catch (error: any) {
-    const msg = error.response?.data?.message
-      ? JSON.stringify(error.response.data.message)
-      : error.message;
-    console.error(`  ❌ BestTime live error for venue ${venueId}: ${msg}`);
-    return null;
-  }
-}
-
 /**
  * Search for car wash venues near a location using Overpass API.
- * Returns results IMMEDIATELY (~1-2s) without blocking on BestTime.
- *
- * Foot-traffic enrichment happens separately via enrichVenuesInBackground().
+ * Returns results IMMEDIATELY (~1-2s).
  */
 export async function searchVenues(
   lat: number,
@@ -176,8 +35,7 @@ export async function searchVenues(
   query: string = "car wash",
 ): Promise<VenueSearchResult[]> {
   let elements: any[] = [];
-  try {
-    const opQuery = `[out:json][timeout:25];
+  const opQuery = `[out:json][timeout:25];
 (
   node["amenity"="car_wash"](around:${radius},${lat},${lng});
   way["amenity"="car_wash"](around:${radius},${lat},${lng});
@@ -185,32 +43,50 @@ export async function searchVenues(
 );
 out tags center;`;
 
-    // Overpass API doesn't support HTTP/2 — force HTTP/1.1 via httpsAgent
-    const response = await axios.post(
-      "https://overpass-api.de/api/interpreter",
-      `data=${encodeURIComponent(opQuery)}`,
-      {
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "User-Agent": "CarWashApp/1.0",
-        },
-        httpsAgent: http1Agent,
-        timeout: 30000,
-      },
-    );
+  const endpoints = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://lz4.overpass-api.de/api/interpreter",
+    "https://z.overpass-api.de/api/interpreter"
+  ];
 
-    elements = response.data?.elements || [];
-    console.log(
-      `  ✅ Overpass found ${elements.length} car wash locations`,
-    );
-  } catch (error: any) {
-    const status = error.response?.status;
-    const msg = error.response?.data
-      ? (typeof error.response.data === "string"
-          ? error.response.data.slice(0, 200)
-          : JSON.stringify(error.response.data).slice(0, 200))
-      : error.message;
-    console.error(`  ❌ Overpass search error (HTTP ${status}): ${msg}`);
+  let success = false;
+  for (const endpoint of endpoints) {
+    try {
+      const response = await axios.post(
+        endpoint,
+        `data=${encodeURIComponent(opQuery)}`,
+        {
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "CarWashApp/1.0",
+          },
+          httpsAgent: http1Agent,
+          timeout: 30000,
+        },
+      );
+
+      if (typeof response.data === "string" && response.data.includes("<html")) {
+         throw new Error("Received HTML error page instead of JSON");
+      }
+
+      elements = response.data?.elements || [];
+      console.log(`  ✅ Overpass (${endpoint}) found ${elements.length} car wash locations`);
+      success = true;
+      break;
+    } catch (error: any) {
+      const status = error.response?.status;
+      const msg = error.response?.data
+        ? (typeof error.response.data === "string"
+            ? error.response.data.slice(0, 200)
+            : JSON.stringify(error.response.data).slice(0, 200))
+        : error.message;
+      console.error(`  ⚠️ Overpass search error with ${endpoint} (HTTP ${status}): ${msg}`);
+    }
+  }
+
+  if (!success) {
+    console.error("  ❌ All Overpass endpoints failed.");
     return [];
   }
 
@@ -275,7 +151,16 @@ export async function fetchGoogleOperatingHours(
  * Matches BestTime's forecast format.
  * If googleHours or osmHours is provided, we use the real hours.
  */
-export function generateSyntheticForecast(venueName: string, options?: { googleHours?: any, osmHours?: string | null }): any[] {
+import NodeCache from "node-cache";
+
+const weatherCache = new NodeCache({ stdTTL: 3600 });
+
+export async function generateSyntheticForecast(
+  venueName: string, 
+  lat: number, 
+  lng: number, 
+  options?: { googleHours?: any, osmHours?: string | null }
+): Promise<any[]> {
   // Simple hash from venue name for per-venue variation (±15%)
   let hash = 0;
   for (let i = 0; i < venueName.length; i++) {
@@ -283,13 +168,58 @@ export function generateSyntheticForecast(venueName: string, options?: { googleH
   }
   const variation = 0.85 + (Math.abs(hash) % 30) / 100; // 0.85 - 1.15
 
+  // Fetch weather from Open-Meteo (with caching based on 1 decimal lat/lng grid)
+  let weatherMultipliers = [1, 1, 1, 1, 1, 1, 1]; // Mon-Sun
+  const cacheKey = `weather_${lat.toFixed(1)}_${lng.toFixed(1)}`;
+  let cachedMultipliers = weatherCache.get<number[]>(cacheKey);
+
+  if (cachedMultipliers) {
+    weatherMultipliers = cachedMultipliers;
+  } else {
+    try {
+      const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&daily=weathercode&timezone=auto`;
+      const res = await axios.get(weatherUrl, { timeout: 5000 });
+      
+      if (res.data?.daily?.weathercode) {
+        const dailyCodes = res.data.daily.weathercode;
+        const dailyTime = res.data.daily.time; 
+        
+        let wasRaining = false;
+        for (let i = 0; i < Math.min(dailyCodes.length, 7); i++) {
+          const code = dailyCodes[i];
+          const dateStr = dailyTime[i];
+          const dateObj = new Date(dateStr + "T12:00:00"); // Avoid timezone shift
+          
+          let btDay = dateObj.getDay() - 1;
+          if (btDay < 0) btDay = 6;
+          
+          const isRaining = (code >= 51 && code <= 99);
+          
+          let multiplier = 1;
+          if (isRaining) {
+            multiplier = 0.2; // 80% drop in customers
+          } else if (wasRaining) {
+            multiplier = 1.4; // 40% surge on sunny day after rain
+          }
+          
+          wasRaining = isRaining;
+          weatherMultipliers[btDay] = multiplier;
+        }
+      }
+    } catch (e) {
+      console.error(`  ⚠️ Weather API error for ${venueName}: ${(e as Error).message}`);
+    } finally {
+      // Cache the result (even if it's the fallback all-1s) to prevent cascading timeouts
+      weatherCache.set(cacheKey, weatherMultipliers);
+    }
+  }
+
   const dayNames = [
     "Monday", "Tuesday", "Wednesday", "Thursday",
     "Friday", "Saturday", "Sunday",
   ];
 
   // Base hourly patterns (index 0=6am ... 17=11pm, 18-23=midnight-5am)
-  // Values are 0-100 busyness percentages
   const weekdayPattern = [
     5, 10, 25, 40, 55, 65, 70, 65, 55, 40, 30, 20, 15, 10, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0,
   ];
@@ -308,32 +238,25 @@ export function generateSyntheticForecast(venueName: string, options?: { googleH
     fridayPattern, saturdayPattern, sundayPattern,
   ];
 
-  // Typical car wash operating hours per day
-  let openHours = [7, 7, 7, 7, 7, 7, 8]; // Mon-Sat 7am, Sun 8am
-  let closeHours = [20, 20, 20, 20, 20, 20, 19]; // Mon-Sat 8pm, Sun 7pm
+  let openHours = [7, 7, 7, 7, 7, 7, 8]; 
+  let closeHours = [20, 20, 20, 20, 20, 20, 19]; 
 
-  // Many major gas station brands and local automated/self-serve washes operate 24/7
   const is24HourBrand = /petro[- ]?canada|shell|esso|mobil|circle[- ]?k|7-eleven|wawa|husky|pioneer|superwash|simoniz|glide wash|self serve|zoom auto spa/i.test(venueName);
   if (is24HourBrand) {
     openHours = [0, 0, 0, 0, 0, 0, 0];
     closeHours = [24, 24, 24, 24, 24, 24, 24];
   }
 
-  // Override with Google Places hours if available
   if (options?.googleHours && options.googleHours.periods) {
-    // Reset all to closed initially
     openHours = [0, 0, 0, 0, 0, 0, 0];
     closeHours = [0, 0, 0, 0, 0, 0, 0];
     
     for (const period of options.googleHours.periods) {
       if (!period.close) {
-        // Open 24 hours
         openHours = [0, 0, 0, 0, 0, 0, 0];
         closeHours = [24, 24, 24, 24, 24, 24, 24];
         break;
       }
-      // Google days: 0 = Sun, 1 = Mon ... 6 = Sat
-      // BestTime days: 0 = Mon, 1 = Tue ... 6 = Sun
       let btDay = period.open.day - 1;
       if (btDay < 0) btDay = 6;
       
@@ -344,13 +267,11 @@ export function generateSyntheticForecast(venueName: string, options?: { googleH
       closeHours[btDay] = cHour === 0 ? 24 : cHour;
     }
   } else if (options?.osmHours) {
-    // Basic OSM opening_hours parsing
     const str = options.osmHours.toLowerCase().trim();
     if (str === "24/7" || str.includes("00:00-24:00")) {
       openHours = [0, 0, 0, 0, 0, 0, 0];
       closeHours = [24, 24, 24, 24, 24, 24, 24];
     } else {
-      // Basic regex for HH:MM-HH:MM
       const match = str.match(/(\d{1,2}):\d{2}\s*-\s*(\d{1,2}):\d{2}/);
       if (match) {
         const oHour = parseInt(match[1], 10);
@@ -362,8 +283,9 @@ export function generateSyntheticForecast(venueName: string, options?: { googleH
   }
 
   return patterns.map((pattern, dayInt) => {
+    const weatherMult = weatherMultipliers[dayInt];
     const dayRaw = pattern.map((val) =>
-      Math.min(100, Math.max(0, Math.round(val * variation))),
+      Math.min(100, Math.max(0, Math.round(val * variation * weatherMult))),
     );
     const dayMax = Math.max(...dayRaw);
     const dayMean = Math.round(dayRaw.reduce((a, b) => a + b, 0) / dayRaw.length);
@@ -385,40 +307,7 @@ export function generateSyntheticForecast(venueName: string, options?: { googleH
   });
 }
 
-/**
- * GET /forecasts — Fetch the 7-day forecast using an existing venue_id.
- * This is free (costs 0 credits) if the venue has already been identified.
- */
-export async function getVenueForecast(venueId: string): Promise<any | null> {
-  if (!API_KEY) return null;
 
-  try {
-	    const response = await axios.get(`${BASE_URL}/forecasts`, {
-	      params: {
-	        api_key_private: API_KEY,
-	        venue_id: venueId,
-	      },
-	      timeout: BESTTIME_TIMEOUT_MS,
-	    });
-
-    const data = response.data;
-    if (data.status !== "OK") {
-      console.log(`  ⚠️  Could not get forecast for venue ${venueId}: ${data.message || "unknown"}`);
-      return null;
-    }
-
-    return data.analysis || null;
-	  } catch (error: any) {
-	    const msg = error.response?.data?.message
-	      ? JSON.stringify(error.response.data.message)
-	      : error.message;
-	    console.error(`  ❌ BestTime getVenueForecast error for venue ${venueId}: ${msg}`);
-	    if (isTransientBestTimeError(error)) {
-	      throw error;
-	    }
-	    return null;
-	  }
-}
 
 /**
  * Convert a 0-100 busyness score to estimated wait minutes.

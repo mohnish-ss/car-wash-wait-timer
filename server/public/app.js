@@ -89,9 +89,9 @@ function getWaitInfo(wash) {
     }
 
     const mins = recent ? recent.estimatedMinutes : -1;
-    let color = '#94a3b8', cls = 'gray', label = 'No BestTime data', speed = 'Unavailable';
+    let color = '#94a3b8', cls = 'gray', label = 'No forecast data', speed = 'Unavailable';
     if (wash.bestTimeStatus === 'temporary_error') {
-        label = 'BestTime unavailable';
+        label = 'Forecast unavailable';
         speed = 'Try again soon';
     }
     // Extended properties for detail view to avoid duplication
@@ -314,7 +314,7 @@ function renderFavorites() {
     document.getElementById('favAvgWait').textContent = waits.length ? avg + ' min' : '— min';
     document.getElementById('favOpenCount').textContent = favWashes.length || '0';
     document.getElementById('favSubtitle').textContent =
-        `BestTime forecasts for your ${favWashes.length} saved location${favWashes.length !== 1 ? 's' : ''}`;
+        `Forecasts for your ${favWashes.length} saved location${favWashes.length !== 1 ? 's' : ''}`;
 
     favWashes.forEach(w => {
         const info = getWaitInfo(w);
@@ -326,7 +326,7 @@ function renderFavorites() {
         <div class="overlay"></div>
         <div class="wait-badge ${info.cls || 'gray'}">
           <span class="dot" style="background:${info.color}"></span>
-          ${info.label === 'Closed' ? 'CLOSED' : (info.mins >= 0 ? 'BESTTIME: ' + info.label.toUpperCase() : 'NO BESTTIME DATA')}
+          ${info.label === 'Closed' ? 'CLOSED' : (info.mins >= 0 ? 'FORECAST: ' + info.label.toUpperCase() : 'NO FORECAST DATA')}
         </div>
         <button class="fav-heart" data-id="${w.id}">
           <span class="material-symbols-outlined" style="font-size:20px;font-variation-settings:'FILL' 1">favorite</span>
@@ -415,7 +415,7 @@ function showDetail(id) {
     const verifiedDiv = document.getElementById('liveVerified');
     if (wash.dataSource === 'forecast' && wash.verifiedAt) {
         verifiedDiv.style.display = 'flex';
-        verifiedDiv.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px; margin-right:4px;">query_stats</span> BestTime forecast cached ${new Date(wash.verifiedAt).toLocaleDateString()}`;
+        verifiedDiv.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px; margin-right:4px;">query_stats</span> Weather-adjusted forecast cached ${new Date(wash.verifiedAt).toLocaleDateString()}`;
     } else {
         verifiedDiv.style.display = 'none';
     }
