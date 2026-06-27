@@ -80,6 +80,10 @@ function toggleFavorite(id) {
 
 /* ── Wait-time helpers ──────────────────────────────────────── */
 function getWaitInfo(wash) {
+    if (wash._estimateLoading) {
+        return { color: '#38bdf8', cls: 'gray', label: 'Checking BestTime', mins: -1, speed: 'Checking BestTime', gradient: ['#38bdf8', '#0ea5e9'], shadow: '56,189,248' };
+    }
+
     const logs = wash.waitTimeLogs || [];
     const recent = logs.length ? logs[logs.length - 1] : null;
 
@@ -89,7 +93,7 @@ function getWaitInfo(wash) {
     }
 
     const mins = recent ? recent.estimatedMinutes : -1;
-    let color = '#94a3b8', cls = 'gray', label = 'No data', speed = 'Unknown';
+    let color = '#94a3b8', cls = 'gray', label = 'No BestTime data', speed = 'Unavailable';
     // Extended properties for detail view to avoid duplication
     let gradient = ['#94a3b8', '#64748b'];
     let shadow = '96,165,250'; // Default blue-ish shadow for empty state if needed
@@ -156,25 +160,25 @@ async function selectMarker(wash, marker) {
     });
     showBottomCard(wash);
 
-    // Lazy load forecast if no wait data
+    // Spend BestTime credits only for the selected venue, and only if the
+    // server does not already have a cached SaaS forecast.
     const info = getWaitInfo(wash);
-    if (info.mins < 0 && !wash._liveFetched && info.label !== 'Closed') {
-        wash._liveFetched = true;
+    if (info.mins < 0 && !wash._estimateFetched && !wash._estimateLoading && info.label !== 'Closed') {
+        wash._estimateLoading = true;
+        showBottomCard(wash);
         try {
-            const bdg = document.getElementById('cardBadges');
-            if (bdg) bdg.innerHTML = '<div class="badge badge-info" id="liveLoadingBadge"><span class="material-symbols-outlined" style="animation:spin 1s linear infinite">progress_activity</span>Loading live wait time...</div>' + bdg.innerHTML;
-
-            const res = await fetch(`/api/carwashes/${wash.id}/live`);
+            const res = await fetch(`/api/carwashes/${wash.id}/estimate`);
             if (res.ok) {
                 const updatedWash = await res.json();
                 Object.assign(wash, updatedWash); // update in place
-                wash._liveFetched = true;
+                wash._estimateFetched = true;
             } else {
-                console.error("Failed to load live wait time", await res.text());
+                console.error("Failed to load BestTime estimate", await res.text());
             }
         } catch (e) {
             console.error(e);
         } finally {
+            wash._estimateLoading = false;
             if (selectedWash === wash) {
                 markers.forEach(m => {
                     const i = getWaitInfo(m.carWash);
@@ -194,7 +198,7 @@ function showBottomCard(wash) {
     badges.innerHTML = '';
     const waitB = document.createElement('div');
     waitB.className = 'badge badge-wait ' + info.cls;
-    waitB.innerHTML = `<span class="material-symbols-outlined">timelapse</span>${info.label === 'No data' ? 'No data' : info.label + ' wait'}`;
+    waitB.innerHTML = `<span class="material-symbols-outlined">timelapse</span>${info.mins >= 0 ? info.label + ' forecast' : info.label}`;
     badges.appendChild(waitB);
     if (wash.brand) {
         const b = document.createElement('div');
@@ -311,10 +315,6 @@ function setupMapEvents() {
         if (selectedWash) window.open(`https://www.google.com/maps/dir/?api=1&destination=${selectedWash.latitude},${selectedWash.longitude}`);
     });
 
-    document.getElementById('cardReportBtn').addEventListener('click', () => {
-        if (selectedWash) openReportModal();
-    });
-
     document.getElementById('cardFavBtn').addEventListener('click', () => {
         if (!selectedWash) return;
         const nowFav = toggleFavorite(selectedWash.id);
@@ -343,7 +343,7 @@ function renderFavorites() {
     document.getElementById('favAvgWait').textContent = waits.length ? avg + ' min' : '— min';
     document.getElementById('favOpenCount').textContent = favWashes.length || '0';
     document.getElementById('favSubtitle').textContent =
-        `Real-time wait times for your ${favWashes.length} saved location${favWashes.length !== 1 ? 's' : ''}`;
+        `BestTime forecasts for your ${favWashes.length} saved location${favWashes.length !== 1 ? 's' : ''}`;
 
     favWashes.forEach(w => {
         const info = getWaitInfo(w);
@@ -355,7 +355,7 @@ function renderFavorites() {
         <div class="overlay"></div>
         <div class="wait-badge ${info.cls || 'gray'}">
           <span class="dot" style="background:${info.color}"></span>
-          ${info.label === 'Closed' ? 'CLOSED' : (info.mins >= 0 ? 'LIVE WAIT: ' + info.label.toUpperCase() : 'NO DATA')}
+          ${info.label === 'Closed' ? 'CLOSED' : (info.mins >= 0 ? 'BESTTIME: ' + info.label.toUpperCase() : 'NO BESTTIME DATA')}
         </div>
         <button class="fav-heart" data-id="${w.id}">
           <span class="material-symbols-outlined" style="font-size:20px;font-variation-settings:'FILL' 1">favorite</span>
@@ -442,10 +442,9 @@ function showDetail(id) {
     pill.querySelectorAll('span').forEach(s => s.style.color = style.color);
 
     const verifiedDiv = document.getElementById('liveVerified');
-    if (wash.dataSource === 'community' && wash.verifiedAt) {
-        const minsAgo = Math.max(0, Math.floor((new Date() - new Date(wash.verifiedAt)) / 60000));
+    if (wash.dataSource === 'forecast' && wash.verifiedAt) {
         verifiedDiv.style.display = 'flex';
-        verifiedDiv.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px; margin-right:4px;">check_circle</span> Verified by community ${minsAgo}m ago`;
+        verifiedDiv.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px; margin-right:4px;">query_stats</span> BestTime forecast cached ${new Date(wash.verifiedAt).toLocaleDateString()}`;
     } else {
         verifiedDiv.style.display = 'none';
     }
@@ -454,45 +453,6 @@ function showDetail(id) {
     document.getElementById('detailShareBtn').onclick = () => { if (navigator.share) navigator.share({ title: wash.name, url: location.href }); };
     document.getElementById('detailBack').onclick = () => { location.hash = '#map'; };
 }
-
-
-/* ── Report Modal ───────────────────────────────────────────── */
-function openReportModal() { document.getElementById('reportModal').classList.add('visible'); }
-function closeReportModal() { document.getElementById('reportModal').classList.remove('visible'); }
-
-document.getElementById('modalClose').addEventListener('click', closeReportModal);
-document.getElementById('reportModal').addEventListener('click', e => {
-    if (e.target === document.getElementById('reportModal')) closeReportModal();
-});
-document.querySelectorAll('.report-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-        const mins = parseInt(btn.dataset.minutes);
-        if (selectedWash) {
-            fetch('/api/carwashes/' + selectedWash.id + '/report', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ estimatedMinutes: mins })
-            }).then(() => {
-                closeReportModal();
-                // Refresh the card with the reported wait
-                const updated = allCarWashes.find(w => w.id === selectedWash.id);
-                if (updated) {
-                    updated.waitTimeLogs = [{
-                        id: 'user_report',
-                        carWashId: updated.id,
-                        timestamp: new Date().toISOString(),
-                        busynessScore: Math.round(mins * 4),
-                        isLive: false,
-                        estimatedMinutes: mins
-                    }];
-                    updated.dataSource = 'community';
-                    updated.verifiedAt = new Date().toISOString();
-                    plotMarkers(allCarWashes);
-                    showBottomCard(updated);
-                }
-            }).catch(() => closeReportModal());
-        } else { closeReportModal(); }
-    });
-});
 
 /* ── Init ───────────────────────────────────────────────────── */
 function hideLoading() {

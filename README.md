@@ -2,12 +2,12 @@
 
 **Live App:** [https://carwash-wait-time.vercel.app/#map](https://carwash-wait-time.vercel.app/#map)
 
-Real-time car wash wait time estimates powered by [BestTime.app](https://besttime.app) foot traffic forecasts.
+Car wash wait time estimates powered by cached [BestTime.app](https://besttime.app) foot traffic forecasts.
 
 ## Features
 
 - **Map Search** — Find car washes near any location using an interactive Leaflet map
-- **Wait Estimates** — Color-coded markers (green/yellow/red) based on forecasted busyness
+- **Wait Estimates** — Color-coded markers (green/yellow/red) based on cached BestTime busyness forecasts
 - **Brand Detection** — Auto-detects 30+ brands (Shell, Petro-Canada, Costco, etc.)
 - **Filters** — Filter by brand and search radius
 - **Favorites** — Save locations locally via cookies
@@ -17,8 +17,8 @@ Real-time car wash wait time estimates powered by [BestTime.app](https://besttim
 
 - **Server:** Express + TypeScript
 - **Frontend:** Vanilla JS + Leaflet + OpenStreetMap
-- **Data:** BestTime.app API (venue search + weekly foot traffic forecasts)
-- **Caching:** In-memory (no database required)
+- **Data:** OpenStreetMap venue discovery + BestTime.app weekly foot traffic forecasts on selected venues
+- **Caching:** SQLite venue and forecast cache, plus short-lived in-memory live cache
 
 ## Setup
 

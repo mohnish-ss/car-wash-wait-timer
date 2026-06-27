@@ -6,12 +6,10 @@ import NodeCache from "node-cache";
 import rateLimit from "express-rate-limit";
 import {
   searchVenues,
-  generateSyntheticForecast,
   mapBusynessToMinutes,
   identifyVenue,
   getVenueForecast,
   getLiveBusyness,
-  fetchGoogleOperatingHours,
 } from "./besttime.service";
 import { cleanAddress, detectBrandAndType } from "./utils";
 import {
@@ -19,7 +17,6 @@ import {
   getVenueById,
   getVenuesInBoundingBox,
   isForecastFresh,
-  updateCommunityWait,
   DBVenue,
 } from "./database";
 
@@ -42,7 +39,8 @@ app.use(express.static(path.join(__dirname, "../public")));
 
 // Live cache: 60 minute TTL
 const liveCache = new NodeCache({ stdTTL: 3600 });
-const FORECAST_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
+const FORECAST_TTL_MS = 28 * 24 * 60 * 60 * 1000; // BestTime forecasts are useful for several weeks
+const UNAVAILABLE_RETRY_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_RADIUS_METERS = 25000;
 const DEFAULT_RADIUS_METERS = 5000;
 
@@ -56,13 +54,6 @@ const apiLimiter = rateLimit({
 const expensiveApiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 30,
-  standardHeaders: "draft-7",
-  legacyHeaders: false,
-});
-
-const reportLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  limit: 20,
   standardHeaders: "draft-7",
   legacyHeaders: false,
 });
@@ -110,7 +101,7 @@ interface CarWashResponse {
     estimatedMinutes: number;
     isClosed: boolean;
   }>;
-  dataSource: "forecast" | "live" | "community";
+  dataSource: "forecast" | "live" | "unavailable";
   verifiedAt?: string | null;
 }
 
@@ -200,8 +191,15 @@ function deg2rad(deg: number) {
 
 function formatResponse(venue: DBVenue): CarWashResponse {
   let forecast = null;
+  const hasBestTimeForecast = Boolean(
+    venue.forecast_json &&
+    (
+      venue.forecast_source === "besttime" ||
+      (venue.besttime_venue_id && venue.forecast_source !== "synthetic")
+    )
+  );
   try {
-    if (venue.forecast_json) {
+    if (hasBestTimeForecast && venue.forecast_json) {
       forecast = JSON.parse(venue.forecast_json);
     }
   } catch (e) {}
@@ -211,17 +209,11 @@ function formatResponse(venue: DBVenue): CarWashResponse {
 
   let finalMins = estimatedMinutes;
   let finalBusyness = busynessScore;
-  let dataSource: "forecast" | "live" | "community" = "forecast";
-  let verifiedAt: string | null = null;
-  
-  if (venue.community_wait_updated_at && venue.community_wait_minutes !== null) {
-      if (Date.now() - venue.community_wait_updated_at < 2 * 60 * 60 * 1000) {
-          finalMins = venue.community_wait_minutes;
-          finalBusyness = Math.min(100, Math.round(finalMins * 4));
-          dataSource = "community";
-          verifiedAt = new Date(venue.community_wait_updated_at).toISOString();
-      }
-  }
+  const dataSource: "forecast" | "live" | "unavailable" =
+    finalMins >= 0 ? "forecast" : "unavailable";
+  const verifiedAt = finalMins >= 0 && venue.forecast_updated_at
+    ? new Date(venue.forecast_updated_at).toISOString()
+    : null;
 
   return {
     id: venue.id,
@@ -236,7 +228,7 @@ function formatResponse(venue: DBVenue): CarWashResponse {
       carWashId: venue.id,
       timestamp: verifiedAt || nowIso,
       busynessScore: finalBusyness,
-      isLive: dataSource !== "forecast",
+      isLive: false,
       estimatedMinutes: finalMins,
       isClosed,
     }] : [],
@@ -267,14 +259,13 @@ app.get("/api/carwashes", expensiveApiLimiter, async (req, res) => {
     const hasFreshCache = dbVenues.length > 0 && dbVenues.some(v => isForecastFresh(v, FORECAST_TTL_MS));
     
     if (!hasFreshCache) {
-      // Fetch from Overpass
+      // Fetch venue discovery from Overpass only. BestTime is called on demand
+      // for a selected venue so broad searches do not burn forecast credits.
       try {
         const venues = await searchVenues(lat, lng, radius, "car wash");
         
-        // Immediately upsert to DB with synthetic forecasts to return fast
         for (const v of venues) {
           const { brand: b, washType: wt } = detectBrandAndType(v.venue_name, v.venue_address);
-          const synthetic = generateSyntheticForecast(v.venue_name, { osmHours: v.osm_opening_hours });
           upsertVenue({
             id: v.venue_id,
             name: v.venue_name,
@@ -283,37 +274,9 @@ app.get("/api/carwashes", expensiveApiLimiter, async (req, res) => {
             longitude: v.venue_lon,
             brand: b,
             wash_type: wt,
-            forecast_json: JSON.stringify(synthetic),
-            forecast_updated_at: Date.now() - FORECAST_TTL_MS - 1000, // Mark as stale so we fetch real data later
           });
         }
-        
-        // Background: Fetch real forecasts and Google hours
-        (async () => {
-          for (const v of venues) {
-            try {
-              let forecast = null;
-              
-              // 1. Try BestTime
-              const ident = await identifyVenue(v.venue_name, v.venue_address || `${v.venue_lat},${v.venue_lon}`);
-              if (ident && ident.forecast) {
-                forecast = ident.forecast;
-              } else {
-                // 2. If BestTime fails, try Google Places for accurate synthetic hours
-                const googleHours = await fetchGoogleOperatingHours(v.venue_name, v.venue_lat, v.venue_lon);
-                forecast = generateSyntheticForecast(v.venue_name, { googleHours, osmHours: v.osm_opening_hours });
-              }
-              
-              upsertVenue({
-                id: v.venue_id,
-                besttime_venue_id: ident?.venueId || null,
-                forecast_json: JSON.stringify(forecast),
-                forecast_updated_at: Date.now(),
-              });
-            } catch (err) {}
-          }
-        })();
-        
+
         // Re-fetch from DB
         dbVenues = getVenuesInBoundingBox(bb.minLat, bb.maxLat, bb.minLng, bb.maxLng);
       } catch (err) {
@@ -339,6 +302,81 @@ app.get("/api/carwashes", expensiveApiLimiter, async (req, res) => {
     res.json(filtered);
   } catch (error) {
     console.error("Error fetching car washes:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.get("/api/carwashes/:id/estimate", expensiveApiLimiter, async (req, res) => {
+  try {
+    const id = getRouteParam(req.params.id);
+    if (!id) {
+      return res.status(400).json({ error: "Invalid car wash id" });
+    }
+    const venue = getVenueById(id);
+    if (!venue) return res.status(404).json({ error: "Car wash not found" });
+
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+
+    const hasFreshBestTimeForecast =
+      (
+        venue.forecast_source === "besttime" ||
+        (venue.besttime_venue_id && venue.forecast_source !== "synthetic")
+      ) &&
+      isForecastFresh(venue, FORECAST_TTL_MS);
+    const hasAnyBestTimeForecast = Boolean(
+      venue.forecast_json &&
+      venue.besttime_venue_id &&
+      venue.forecast_source !== "synthetic"
+    );
+
+    if (hasFreshBestTimeForecast) {
+      return res.json(formatResponse(venue));
+    }
+
+    if (
+      venue.forecast_source === "unavailable" &&
+      venue.forecast_updated_at &&
+      Date.now() - venue.forecast_updated_at < UNAVAILABLE_RETRY_MS
+    ) {
+      return res.json(formatResponse(venue));
+    }
+
+    let forecast = null;
+    let besttimeVenueId = venue.besttime_venue_id;
+
+    if (besttimeVenueId) {
+      forecast = await getVenueForecast(besttimeVenueId);
+    } else {
+      const ident = await identifyVenue(
+        venue.name,
+        venue.address || `${venue.latitude},${venue.longitude}`,
+      );
+      if (ident) {
+        besttimeVenueId = ident.venueId;
+        forecast = ident.forecast;
+      }
+    }
+
+    if (forecast && besttimeVenueId) {
+      upsertVenue({
+        id: venue.id,
+        besttime_venue_id: besttimeVenueId,
+        forecast_json: JSON.stringify(forecast),
+        forecast_updated_at: Date.now(),
+        forecast_source: "besttime",
+      });
+    } else if (!hasAnyBestTimeForecast) {
+      upsertVenue({
+        id: venue.id,
+        forecast_updated_at: Date.now(),
+        forecast_source: "unavailable",
+      });
+    }
+
+    const updated = getVenueById(venue.id);
+    return res.json(updated ? formatResponse(updated) : formatResponse(venue));
+  } catch (error) {
+    console.error("Estimate fetch error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -427,35 +465,6 @@ app.get("/api/carwashes/:id/live", expensiveApiLimiter, async (req, res) => {
     console.error("Live fetch error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
-});
-
-app.post("/api/carwashes/:id/report", reportLimiter, (req, res) => {
-  const id = getRouteParam(req.params.id);
-  if (!id) {
-    return res.status(400).json({ error: "Invalid car wash id" });
-  }
-  const venue = getVenueById(id);
-  if (!venue) {
-    return res.status(404).json({ error: "Car wash not found" });
-  }
-
-  const { estimatedMinutes } = req.body;
-  if (!Number.isInteger(estimatedMinutes) || estimatedMinutes < 0 || estimatedMinutes > 120) {
-    return res.status(400).json({ error: "estimatedMinutes must be an integer from 0 to 120" });
-  }
-
-  const busynessScore = Math.min(100, Math.round(estimatedMinutes * 4));
-  
-  updateCommunityWait(venue.id, estimatedMinutes);
-  
-  // Update live cache
-  const cacheKey = `live_${venue.id}`;
-  liveCache.set(cacheKey, {
-    busynessScore,
-    estimatedMinutes
-  });
-
-  res.json({ success: true, estimatedMinutes, busynessScore });
 });
 
 app.get("/api/geocode", expensiveApiLimiter, async (req, res) => {

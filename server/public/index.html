@@ -106,9 +106,6 @@
               <span class="material-symbols-outlined">directions</span>
             </button>
           </div>
-          <button class="btn-report-pill" id="cardReportBtn">
-            <span class="material-symbols-outlined">edit_note</span> Report Wait
-          </button>
         </div>
       </div>
     </div>
@@ -143,7 +140,7 @@
             My Saved Locations
           </div>
           <h2 class="fav-title">Your Favorites</h2>
-          <p class="fav-sub" id="favSubtitle">Real-time wait times for your saved locations</p>
+          <p class="fav-sub" id="favSubtitle">BestTime forecasts for your saved locations</p>
           <div class="fav-stats">
             <div>
               <div class="fav-stat-label">Avg Wait</div>
@@ -200,17 +197,17 @@
 
         <div class="detail-grid">
           <div class="detail-main">
-            <!-- Live Status Card -->
+            <!-- BestTime Forecast Card -->
             <div class="live-card" id="liveCard">
               <div class="glow"></div>
               <div class="live-header">
                 <div class="live-ping"><span class="ring"></span><span class="dot"></span></div>
-                <span class="live-status-label">Live Status</span>
+                <span class="live-status-label">BestTime Forecast</span>
               </div>
               <div class="live-body">
                 <div>
                   <div class="live-big" id="liveCars">— Cars</div>
-                  <div class="live-sub">Currently in line</div>
+                  <div class="live-sub">Estimated queue</div>
                 </div>
                 <div style="text-align:right">
                   <div class="live-wait-pill" id="liveSpeedPill">
@@ -291,53 +288,6 @@
         </div>
       </div>
 
-    </div>
-  </div>
-
-  <!-- ═══════ Report Modal ═══════ -->
-  <div class="modal-overlay" id="reportModal">
-    <div class="modal-card">
-      <button class="modal-close" id="modalClose">
-        <span class="material-symbols-outlined">close</span>
-      </button>
-      <div class="modal-icon">
-        <span class="material-symbols-outlined">local_car_wash</span>
-      </div>
-      <h2 class="modal-title">How long is the line?</h2>
-      <p class="modal-sub">Help fellow washers save time & earn 50 points!</p>
-      <div class="report-options">
-        <button class="report-btn green" data-minutes="0">
-          <div class="left">
-            <div class="btn-icon"><span class="material-symbols-outlined">speed</span></div>
-            <div>
-              <div class="btn-title">Empty</div>
-              <div class="btn-sub">0 min wait</div>
-            </div>
-          </div>
-          <span class="material-symbols-outlined arrow">arrow_forward_ios</span>
-        </button>
-        <button class="report-btn yellow" data-minutes="15">
-          <div class="left">
-            <div class="btn-icon"><span class="material-symbols-outlined">hourglass_top</span></div>
-            <div>
-              <div class="btn-title">Medium</div>
-              <div class="btn-sub">10–20 min wait</div>
-            </div>
-          </div>
-          <span class="material-symbols-outlined arrow">arrow_forward_ios</span>
-        </button>
-        <button class="report-btn red" data-minutes="35">
-          <div class="left">
-            <div class="btn-icon"><span class="material-symbols-outlined">traffic</span></div>
-            <div>
-              <div class="btn-title">Long</div>
-              <div class="btn-sub">30m+ wait</div>
-            </div>
-          </div>
-          <span class="material-symbols-outlined arrow">arrow_forward_ios</span>
-        </button>
-      </div>
-      <div class="gradient-bar"></div>
     </div>
   </div>
 

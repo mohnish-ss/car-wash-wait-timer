@@ -13,6 +13,7 @@ export interface DBVenue {
   wash_type: string | null;
   forecast_json: string | null; // stored as JSON string
   forecast_updated_at: number | null; // Unix timestamp
+  forecast_source: string | null; // besttime, synthetic, unavailable
   community_wait_minutes: number | null;
   community_wait_updated_at: number | null;
   created_at: number; // Unix timestamp
@@ -41,6 +42,7 @@ export function initDatabase() {
       wash_type TEXT,
       forecast_json TEXT,
       forecast_updated_at INTEGER,
+      forecast_source TEXT,
       community_wait_minutes INTEGER,
       community_wait_updated_at INTEGER,
       created_at INTEGER NOT NULL
@@ -51,6 +53,7 @@ export function initDatabase() {
   
   try { db.exec("ALTER TABLE venues ADD COLUMN community_wait_minutes INTEGER"); } catch(e) {}
   try { db.exec("ALTER TABLE venues ADD COLUMN community_wait_updated_at INTEGER"); } catch(e) {}
+  try { db.exec("ALTER TABLE venues ADD COLUMN forecast_source TEXT"); } catch(e) {}
 }
 
 /**
@@ -71,7 +74,8 @@ export function upsertVenue(venue: Partial<DBVenue> & { id: string }): void {
         brand = coalesce(?, brand),
         wash_type = coalesce(?, wash_type),
         forecast_json = coalesce(?, forecast_json),
-        forecast_updated_at = coalesce(?, forecast_updated_at)
+        forecast_updated_at = coalesce(?, forecast_updated_at),
+        forecast_source = coalesce(?, forecast_source)
       WHERE id = ?
     `);
     
@@ -85,14 +89,15 @@ export function upsertVenue(venue: Partial<DBVenue> & { id: string }): void {
       venue.wash_type ?? null,
       venue.forecast_json ?? null,
       venue.forecast_updated_at ?? null,
+      venue.forecast_source ?? null,
       venue.id
     );
   } else {
     const insertStmt = db.prepare(`
       INSERT INTO venues (
         id, besttime_venue_id, name, address, latitude, longitude, 
-        brand, wash_type, forecast_json, forecast_updated_at, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        brand, wash_type, forecast_json, forecast_updated_at, forecast_source, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     insertStmt.run(
@@ -106,6 +111,7 @@ export function upsertVenue(venue: Partial<DBVenue> & { id: string }): void {
       venue.wash_type ?? null,
       venue.forecast_json ?? null,
       venue.forecast_updated_at ?? null,
+      venue.forecast_source ?? null,
       now
     );
   }
@@ -146,20 +152,6 @@ export function isForecastFresh(venue: DBVenue | null, ttlMs: number): boolean {
     return false;
   }
   return (Date.now() - venue.forecast_updated_at) < ttlMs;
-}
-
-/**
- * Update the community reported wait time for a venue.
- */
-export function updateCommunityWait(id: string, mins: number): void {
-  const now = Date.now();
-  const stmt = db.prepare(`
-    UPDATE venues SET 
-      community_wait_minutes = ?, 
-      community_wait_updated_at = ? 
-    WHERE id = ?
-  `);
-  stmt.run(mins, now, id);
 }
 
 // Initialize tables on import
