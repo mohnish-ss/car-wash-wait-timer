@@ -245,6 +245,74 @@ function formatResponse(venue: DBVenue): CarWashResponse {
   };
 }
 
+function hasFreshBestTimeForecast(venue: DBVenue): boolean {
+  return (
+    (
+      venue.forecast_source === "besttime" ||
+      Boolean(venue.besttime_venue_id && venue.forecast_source !== "synthetic")
+    ) &&
+    isForecastFresh(venue, FORECAST_TTL_MS)
+  );
+}
+
+function hasAnyBestTimeForecast(venue: DBVenue): boolean {
+  return Boolean(
+    venue.forecast_json &&
+    venue.besttime_venue_id &&
+    venue.forecast_source !== "synthetic"
+  );
+}
+
+function hasRecentUnavailableResult(venue: DBVenue): boolean {
+  return Boolean(
+    venue.forecast_source === "unavailable" &&
+    venue.forecast_updated_at &&
+    Date.now() - venue.forecast_updated_at < UNAVAILABLE_RETRY_MS
+  );
+}
+
+async function refreshBestTimeForecast(venue: DBVenue): Promise<void> {
+  if (hasFreshBestTimeForecast(venue) || hasRecentUnavailableResult(venue)) {
+    return;
+  }
+
+  let forecast = null;
+  let besttimeVenueId = venue.besttime_venue_id;
+
+  if (besttimeVenueId) {
+    forecast = await getVenueForecast(besttimeVenueId);
+  } else {
+    const ident = await identifyVenue(
+      venue.name,
+      venue.address || `${venue.latitude},${venue.longitude}`,
+    );
+    if (ident) {
+      besttimeVenueId = ident.venueId;
+      forecast = ident.forecast;
+    }
+  }
+
+  if (forecast && besttimeVenueId) {
+    upsertVenue({
+      id: venue.id,
+      besttime_venue_id: besttimeVenueId,
+      forecast_json: JSON.stringify(forecast),
+      forecast_updated_at: Date.now(),
+      forecast_source: "besttime",
+    });
+  } else if (!hasAnyBestTimeForecast(venue)) {
+    upsertVenue({
+      id: venue.id,
+      forecast_updated_at: Date.now(),
+      forecast_source: "unavailable",
+    });
+  }
+}
+
+async function enrichVenuesWithBestTime(venues: DBVenue[]): Promise<void> {
+  await Promise.allSettled(venues.map((venue) => refreshBestTimeForecast(venue)));
+}
+
 app.get("/api/carwashes", expensiveApiLimiter, async (req, res) => {
   try {
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
@@ -292,20 +360,23 @@ app.get("/api/carwashes", expensiveApiLimiter, async (req, res) => {
       }
     }
 
-    let results = dbVenues.map(formatResponse);
-
-    results = results.filter((cw) => {
-      const dist = getDistanceFromLatLonInMeters(lat, lng, cw.latitude, cw.longitude);
+    let filteredVenues = dbVenues.filter((venue) => {
+      const dist = getDistanceFromLatLonInMeters(lat, lng, venue.latitude, venue.longitude);
       return dist <= radius;
     });
 
-    let filtered = results.filter((cw) => {
-      const t = (cw.washType || "").toLowerCase();
+    filteredVenues = filteredVenues.filter((venue) => {
+      const t = (venue.wash_type || "").toLowerCase();
       return t !== "hand-wash";
     });
 
-    if (brand) filtered = filtered.filter((cw) => cw.brand === brand);
-    if (washType) filtered = filtered.filter((cw) => cw.washType === washType);
+    if (brand) filteredVenues = filteredVenues.filter((venue) => venue.brand === brand);
+    if (washType) filteredVenues = filteredVenues.filter((venue) => venue.wash_type === washType);
+
+    await enrichVenuesWithBestTime(filteredVenues);
+
+    const updatedVenues = filteredVenues.map((venue) => getVenueById(venue.id) || venue);
+    const filtered = updatedVenues.map(formatResponse);
 
     res.json(filtered);
   } catch (error) {
@@ -325,61 +396,15 @@ app.get("/api/carwashes/:id/estimate", expensiveApiLimiter, async (req, res) => 
 
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
 
-    const hasFreshBestTimeForecast =
-      (
-        venue.forecast_source === "besttime" ||
-        (venue.besttime_venue_id && venue.forecast_source !== "synthetic")
-      ) &&
-      isForecastFresh(venue, FORECAST_TTL_MS);
-    const hasAnyBestTimeForecast = Boolean(
-      venue.forecast_json &&
-      venue.besttime_venue_id &&
-      venue.forecast_source !== "synthetic"
-    );
-
-    if (hasFreshBestTimeForecast) {
+    if (hasFreshBestTimeForecast(venue)) {
       return res.json(formatResponse(venue));
     }
 
-    if (
-      venue.forecast_source === "unavailable" &&
-      venue.forecast_updated_at &&
-      Date.now() - venue.forecast_updated_at < UNAVAILABLE_RETRY_MS
-    ) {
+    if (hasRecentUnavailableResult(venue)) {
       return res.json(formatResponse(venue));
     }
 
-    let forecast = null;
-    let besttimeVenueId = venue.besttime_venue_id;
-
-    if (besttimeVenueId) {
-      forecast = await getVenueForecast(besttimeVenueId);
-    } else {
-      const ident = await identifyVenue(
-        venue.name,
-        venue.address || `${venue.latitude},${venue.longitude}`,
-      );
-      if (ident) {
-        besttimeVenueId = ident.venueId;
-        forecast = ident.forecast;
-      }
-    }
-
-    if (forecast && besttimeVenueId) {
-      upsertVenue({
-        id: venue.id,
-        besttime_venue_id: besttimeVenueId,
-        forecast_json: JSON.stringify(forecast),
-        forecast_updated_at: Date.now(),
-        forecast_source: "besttime",
-      });
-    } else if (!hasAnyBestTimeForecast) {
-      upsertVenue({
-        id: venue.id,
-        forecast_updated_at: Date.now(),
-        forecast_source: "unavailable",
-      });
-    }
+    await refreshBestTimeForecast(venue);
 
     const updated = getVenueById(venue.id);
     return res.json(updated ? formatResponse(updated) : formatResponse(venue));

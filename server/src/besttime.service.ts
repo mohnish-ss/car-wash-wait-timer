@@ -11,6 +11,7 @@ dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
 const API_KEY = process.env.BESTTIME_API_KEY || "";
 const BASE_URL = "https://besttime.app/api/v1";
+const BESTTIME_TIMEOUT_MS = 8000;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -60,13 +61,14 @@ export async function identifyVenue(
   }
 
   try {
-    const response = await axios.post(`${BASE_URL}/forecasts`, null, {
-      params: {
-        api_key_private: API_KEY,
-        venue_name: name,
-        venue_address: address,
-      },
-    });
+	    const response = await axios.post(`${BASE_URL}/forecasts`, null, {
+	      params: {
+	        api_key_private: API_KEY,
+	        venue_name: name,
+	        venue_address: address,
+	      },
+	      timeout: BESTTIME_TIMEOUT_MS,
+	    });
 
     const data = response.data;
 
@@ -105,12 +107,13 @@ export async function getLiveBusyness(
   }
 
   try {
-    const response = await axios.post(`${BASE_URL}/forecasts/live`, null, {
-      params: {
-        api_key_private: API_KEY,
-        venue_id: venueId,
-      },
-    });
+	    const response = await axios.post(`${BASE_URL}/forecasts/live`, null, {
+	      params: {
+	        api_key_private: API_KEY,
+	        venue_id: venueId,
+	      },
+	      timeout: BESTTIME_TIMEOUT_MS,
+	    });
 
     const data = response.data;
 
@@ -375,12 +378,13 @@ export async function getVenueForecast(venueId: string): Promise<any | null> {
   if (!API_KEY) return null;
 
   try {
-    const response = await axios.get(`${BASE_URL}/forecasts`, {
-      params: {
-        api_key_private: API_KEY,
-        venue_id: venueId,
-      },
-    });
+	    const response = await axios.get(`${BASE_URL}/forecasts`, {
+	      params: {
+	        api_key_private: API_KEY,
+	        venue_id: venueId,
+	      },
+	      timeout: BESTTIME_TIMEOUT_MS,
+	    });
 
     const data = response.data;
     if (data.status !== "OK") {

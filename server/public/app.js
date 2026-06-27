@@ -80,10 +80,6 @@ function toggleFavorite(id) {
 
 /* ── Wait-time helpers ──────────────────────────────────────── */
 function getWaitInfo(wash) {
-    if (wash._estimateLoading) {
-        return { color: '#38bdf8', cls: 'gray', label: 'Checking BestTime', mins: -1, speed: 'Checking BestTime', gradient: ['#38bdf8', '#0ea5e9'], shadow: '56,189,248' };
-    }
-
     const logs = wash.waitTimeLogs || [];
     const recent = logs.length ? logs[logs.length - 1] : null;
 
@@ -111,12 +107,6 @@ function getWaitInfo(wash) {
         gradient = ['#f87171', '#ef4444']; shadow = '248,113,113';
     }
     return { color, cls, label, mins, speed, gradient, shadow };
-}
-
-function shouldRequestBestTimeEstimate(wash, info) {
-    if (info.mins >= 0 || info.label === 'Closed') return false;
-    if (wash._estimateFetched || wash._estimateLoading) return false;
-    return !wash.bestTimeStatus || wash.bestTimeStatus === 'not_requested';
 }
 
 /* ── Map ────────────────────────────────────────────────────── */
@@ -158,42 +148,13 @@ function plotMarkers(washes) {
     });
 }
 
-async function selectMarker(wash, marker) {
+function selectMarker(wash, marker) {
     selectedWash = wash;
     markers.forEach(m => {
         const info = getWaitInfo(m.carWash);
         m.setIcon(createDotIcon(info.color, m === marker));
     });
     showBottomCard(wash);
-
-    // Spend BestTime credits only for the selected venue, and only if the
-    // server does not already have a cached SaaS forecast.
-    const info = getWaitInfo(wash);
-    if (shouldRequestBestTimeEstimate(wash, info)) {
-        wash._estimateLoading = true;
-        showBottomCard(wash);
-        try {
-            const res = await fetch(`/api/carwashes/${wash.id}/estimate`);
-            if (res.ok) {
-                const updatedWash = await res.json();
-                Object.assign(wash, updatedWash); // update in place
-                wash._estimateFetched = true;
-            } else {
-                console.error("Failed to load BestTime estimate", await res.text());
-            }
-        } catch (e) {
-            console.error(e);
-        } finally {
-            wash._estimateLoading = false;
-            if (selectedWash === wash) {
-                markers.forEach(m => {
-                    const i = getWaitInfo(m.carWash);
-                    m.setIcon(createDotIcon(i.color, m.carWash === wash));
-                });
-                showBottomCard(wash);
-            }
-        }
-    }
 }
 
 function showBottomCard(wash) {
