@@ -3,6 +3,7 @@ import cors from "cors";
 import path from "path";
 import dotenv from "dotenv";
 import NodeCache from "node-cache";
+import rateLimit from "express-rate-limit";
 import {
   searchVenues,
   generateSyntheticForecast,
@@ -28,13 +29,69 @@ dotenv.config({ path: path.resolve(__dirname, "../.env") });
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors());
-app.use(express.json());
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(cors({
+  origin: allowedOrigins.length > 0 ? allowedOrigins : false,
+}));
+app.use(express.json({ limit: "20kb" }));
 app.use(express.static(path.join(__dirname, "../public")));
 
 // Live cache: 60 minute TTL
 const liveCache = new NodeCache({ stdTTL: 3600 });
 const FORECAST_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
+const MAX_RADIUS_METERS = 25000;
+const DEFAULT_RADIUS_METERS = 5000;
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 120,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+});
+
+const expensiveApiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+});
+
+const reportLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 20,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+});
+
+app.use("/api", apiLimiter);
+
+function parseLatitude(value: unknown): number | null {
+  const lat = typeof value === "string" ? Number.parseFloat(value) : NaN;
+  return Number.isFinite(lat) && lat >= -90 && lat <= 90 ? lat : null;
+}
+
+function parseLongitude(value: unknown): number | null {
+  const lng = typeof value === "string" ? Number.parseFloat(value) : NaN;
+  return Number.isFinite(lng) && lng >= -180 && lng <= 180 ? lng : null;
+}
+
+function parseRadius(value: unknown): number {
+  if (typeof value !== "string") return DEFAULT_RADIUS_METERS;
+  const radius = Number.parseInt(value, 10);
+  if (!Number.isFinite(radius) || radius <= 0) return DEFAULT_RADIUS_METERS;
+  return Math.min(radius, MAX_RADIUS_METERS);
+}
+
+function getRouteParam(value: string | string[] | undefined): string | null {
+  if (typeof value === "string" && value.length > 0 && value.length <= 128) {
+    return value;
+  }
+  return null;
+}
 
 interface CarWashResponse {
   id: string;
@@ -188,19 +245,19 @@ function formatResponse(venue: DBVenue): CarWashResponse {
   };
 }
 
-app.get("/api/carwashes", async (req, res) => {
+app.get("/api/carwashes", expensiveApiLimiter, async (req, res) => {
   try {
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     res.setHeader("Pragma", "no-cache");
     res.setHeader("Expires", "0");
-    const lat = req.query.lat ? parseFloat(req.query.lat as string) : undefined;
-    const lng = req.query.lng ? parseFloat(req.query.lng as string) : undefined;
-    const radius = req.query.radius ? parseInt(req.query.radius as string, 10) : 5000;
+    const lat = parseLatitude(req.query.lat);
+    const lng = parseLongitude(req.query.lng);
+    const radius = parseRadius(req.query.radius);
     const brand = req.query.brand as string | undefined;
     const washType = req.query.washType as string | undefined;
 
-    if (lat === undefined || lng === undefined) {
-      return res.json([]);
+    if (lat === null || lng === null) {
+      return res.status(400).json({ error: "Valid lat and lng query params are required" });
     }
 
     const bb = radiusToBoundingBox(lat, lng, radius);
@@ -297,16 +354,24 @@ app.get("/api/filters", (_req, res) => {
 
 app.get("/api/carwashes/:id", (req, res) => {
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-  const venue = getVenueById(req.params.id);
+  const id = getRouteParam(req.params.id);
+  if (!id) {
+    return res.status(400).json({ error: "Invalid car wash id" });
+  }
+  const venue = getVenueById(id);
   if (!venue) {
     return res.status(404).json({ error: "Car wash not found" });
   }
   res.json(formatResponse(venue));
 });
 
-app.get("/api/carwashes/:id/live", async (req, res) => {
+app.get("/api/carwashes/:id/live", expensiveApiLimiter, async (req, res) => {
   try {
-    const venue = getVenueById(req.params.id);
+    const id = getRouteParam(req.params.id);
+    if (!id) {
+      return res.status(400).json({ error: "Invalid car wash id" });
+    }
+    const venue = getVenueById(id);
     if (!venue) return res.status(404).json({ error: "Not found" });
 
     const baseResponse = formatResponse(venue);
@@ -364,15 +429,19 @@ app.get("/api/carwashes/:id/live", async (req, res) => {
   }
 });
 
-app.post("/api/carwashes/:id/report", (req, res) => {
-  const venue = getVenueById(req.params.id);
+app.post("/api/carwashes/:id/report", reportLimiter, (req, res) => {
+  const id = getRouteParam(req.params.id);
+  if (!id) {
+    return res.status(400).json({ error: "Invalid car wash id" });
+  }
+  const venue = getVenueById(id);
   if (!venue) {
     return res.status(404).json({ error: "Car wash not found" });
   }
 
   const { estimatedMinutes } = req.body;
-  if (typeof estimatedMinutes !== "number" || estimatedMinutes < 0) {
-    return res.status(400).json({ error: "estimatedMinutes is required (number >= 0)" });
+  if (!Number.isInteger(estimatedMinutes) || estimatedMinutes < 0 || estimatedMinutes > 120) {
+    return res.status(400).json({ error: "estimatedMinutes must be an integer from 0 to 120" });
   }
 
   const busynessScore = Math.min(100, Math.round(estimatedMinutes * 4));
@@ -389,11 +458,11 @@ app.post("/api/carwashes/:id/report", (req, res) => {
   res.json({ success: true, estimatedMinutes, busynessScore });
 });
 
-app.get("/api/geocode", async (req, res) => {
+app.get("/api/geocode", expensiveApiLimiter, async (req, res) => {
   try {
     res.set("Cache-Control", "no-store, max-age=0");
     const address = req.query.address as string;
-    if (!address) {
+    if (!address || address.length > 200) {
       return res.status(400).json({ error: "address query param is required" });
     }
 
