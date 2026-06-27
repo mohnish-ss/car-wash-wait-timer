@@ -102,6 +102,7 @@ interface CarWashResponse {
     isClosed: boolean;
   }>;
   dataSource: "forecast" | "live" | "unavailable";
+  bestTimeStatus: "cached" | "not_requested" | "unavailable";
   verifiedAt?: string | null;
 }
 
@@ -211,6 +212,12 @@ function formatResponse(venue: DBVenue): CarWashResponse {
   let finalBusyness = busynessScore;
   const dataSource: "forecast" | "live" | "unavailable" =
     finalMins >= 0 ? "forecast" : "unavailable";
+  const bestTimeStatus: "cached" | "not_requested" | "unavailable" =
+    finalMins >= 0
+      ? "cached"
+      : venue.forecast_source === "unavailable"
+        ? "unavailable"
+        : "not_requested";
   const verifiedAt = finalMins >= 0 && venue.forecast_updated_at
     ? new Date(venue.forecast_updated_at).toISOString()
     : null;
@@ -233,6 +240,7 @@ function formatResponse(venue: DBVenue): CarWashResponse {
       isClosed,
     }] : [],
     dataSource,
+    bestTimeStatus,
     verifiedAt,
   };
 }

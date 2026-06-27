@@ -113,6 +113,12 @@ function getWaitInfo(wash) {
     return { color, cls, label, mins, speed, gradient, shadow };
 }
 
+function shouldRequestBestTimeEstimate(wash, info) {
+    if (info.mins >= 0 || info.label === 'Closed') return false;
+    if (wash._estimateFetched || wash._estimateLoading) return false;
+    return !wash.bestTimeStatus || wash.bestTimeStatus === 'not_requested';
+}
+
 /* ── Map ────────────────────────────────────────────────────── */
 function initMap() {
     map = L.map('map', { zoomControl: false });
@@ -163,7 +169,7 @@ async function selectMarker(wash, marker) {
     // Spend BestTime credits only for the selected venue, and only if the
     // server does not already have a cached SaaS forecast.
     const info = getWaitInfo(wash);
-    if (info.mins < 0 && !wash._estimateFetched && !wash._estimateLoading && info.label !== 'Closed') {
+    if (shouldRequestBestTimeEstimate(wash, info)) {
         wash._estimateLoading = true;
         showBottomCard(wash);
         try {
