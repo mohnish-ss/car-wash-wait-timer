@@ -90,6 +90,10 @@ function getWaitInfo(wash) {
 
     const mins = recent ? recent.estimatedMinutes : -1;
     let color = '#94a3b8', cls = 'gray', label = 'No BestTime data', speed = 'Unavailable';
+    if (wash.bestTimeStatus === 'temporary_error') {
+        label = 'BestTime unavailable';
+        speed = 'Try again soon';
+    }
     // Extended properties for detail view to avoid duplication
     let gradient = ['#94a3b8', '#64748b'];
     let shadow = '96,165,250'; // Default blue-ish shadow for empty state if needed

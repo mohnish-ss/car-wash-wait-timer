@@ -13,6 +13,18 @@ const API_KEY = process.env.BESTTIME_API_KEY || "";
 const BASE_URL = "https://besttime.app/api/v1";
 const BESTTIME_TIMEOUT_MS = 8000;
 
+function isTransientBestTimeError(error: any): boolean {
+  const status = error.response?.status;
+  return (
+    !error.response ||
+    error.code === "ECONNABORTED" ||
+    error.code === "ETIMEDOUT" ||
+    status === 408 ||
+    status === 429 ||
+    status >= 500
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -84,13 +96,16 @@ export async function identifyVenue(
 
     console.log(`  ✅ Identified "${name}" → venue_id: ${venueId}`);
     return { venueId, forecast };
-  } catch (error: any) {
-    const msg = error.response?.data?.message
-      ? JSON.stringify(error.response.data.message)
-      : error.message;
-    console.error(`  ❌ BestTime identifyVenue error for "${name}": ${msg}`);
-    return null;
-  }
+	  } catch (error: any) {
+	    const msg = error.response?.data?.message
+	      ? JSON.stringify(error.response.data.message)
+	      : error.message;
+	    console.error(`  ❌ BestTime identifyVenue error for "${name}": ${msg}`);
+	    if (isTransientBestTimeError(error)) {
+	      throw error;
+	    }
+	    return null;
+	  }
 }
 
 /**
@@ -393,13 +408,16 @@ export async function getVenueForecast(venueId: string): Promise<any | null> {
     }
 
     return data.analysis || null;
-  } catch (error: any) {
-    const msg = error.response?.data?.message
-      ? JSON.stringify(error.response.data.message)
-      : error.message;
-    console.error(`  ❌ BestTime getVenueForecast error for venue ${venueId}: ${msg}`);
-    return null;
-  }
+	  } catch (error: any) {
+	    const msg = error.response?.data?.message
+	      ? JSON.stringify(error.response.data.message)
+	      : error.message;
+	    console.error(`  ❌ BestTime getVenueForecast error for venue ${venueId}: ${msg}`);
+	    if (isTransientBestTimeError(error)) {
+	      throw error;
+	    }
+	    return null;
+	  }
 }
 
 /**

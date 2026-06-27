@@ -41,6 +41,7 @@ app.use(express.static(path.join(__dirname, "../public")));
 const liveCache = new NodeCache({ stdTTL: 3600 });
 const FORECAST_TTL_MS = 28 * 24 * 60 * 60 * 1000; // BestTime forecasts are useful for several weeks
 const UNAVAILABLE_RETRY_MS = 7 * 24 * 60 * 60 * 1000;
+const TRANSIENT_ERROR_RETRY_MS = 5 * 60 * 1000;
 const MAX_RADIUS_METERS = 25000;
 const DEFAULT_RADIUS_METERS = 5000;
 
@@ -102,7 +103,7 @@ interface CarWashResponse {
     isClosed: boolean;
   }>;
   dataSource: "forecast" | "live" | "unavailable";
-  bestTimeStatus: "cached" | "not_requested" | "unavailable";
+  bestTimeStatus: "cached" | "not_requested" | "unavailable" | "temporary_error";
   verifiedAt?: string | null;
 }
 
@@ -212,10 +213,13 @@ function formatResponse(venue: DBVenue): CarWashResponse {
   let finalBusyness = busynessScore;
   const dataSource: "forecast" | "live" | "unavailable" =
     finalMins >= 0 ? "forecast" : "unavailable";
-  const bestTimeStatus: "cached" | "not_requested" | "unavailable" =
+  const bestTimeStatus: "cached" | "not_requested" | "unavailable" | "temporary_error" =
     finalMins >= 0
       ? "cached"
-      : venue.forecast_source === "unavailable"
+      : venue.forecast_source === "besttime_error"
+        ? "temporary_error"
+      : venue.forecast_source === "besttime_unavailable" ||
+        venue.forecast_source === "unavailable"
         ? "unavailable"
         : "not_requested";
   const verifiedAt = finalMins >= 0 && venue.forecast_updated_at
@@ -265,31 +269,54 @@ function hasAnyBestTimeForecast(venue: DBVenue): boolean {
 
 function hasRecentUnavailableResult(venue: DBVenue): boolean {
   return Boolean(
-    venue.forecast_source === "unavailable" &&
+    venue.forecast_source === "besttime_unavailable" &&
     venue.forecast_updated_at &&
     Date.now() - venue.forecast_updated_at < UNAVAILABLE_RETRY_MS
   );
 }
 
+function hasRecentTransientError(venue: DBVenue): boolean {
+  return Boolean(
+    venue.forecast_source === "besttime_error" &&
+    venue.forecast_updated_at &&
+    Date.now() - venue.forecast_updated_at < TRANSIENT_ERROR_RETRY_MS
+  );
+}
+
 async function refreshBestTimeForecast(venue: DBVenue): Promise<void> {
-  if (hasFreshBestTimeForecast(venue) || hasRecentUnavailableResult(venue)) {
+  if (
+    hasFreshBestTimeForecast(venue) ||
+    hasRecentUnavailableResult(venue) ||
+    hasRecentTransientError(venue)
+  ) {
     return;
   }
 
   let forecast = null;
   let besttimeVenueId = venue.besttime_venue_id;
 
-  if (besttimeVenueId) {
-    forecast = await getVenueForecast(besttimeVenueId);
-  } else {
-    const ident = await identifyVenue(
-      venue.name,
-      venue.address || `${venue.latitude},${venue.longitude}`,
-    );
-    if (ident) {
-      besttimeVenueId = ident.venueId;
-      forecast = ident.forecast;
+  try {
+    if (besttimeVenueId) {
+      forecast = await getVenueForecast(besttimeVenueId);
+    } else {
+      const ident = await identifyVenue(
+        venue.name,
+        venue.address || `${venue.latitude},${venue.longitude}`,
+      );
+      if (ident) {
+        besttimeVenueId = ident.venueId;
+        forecast = ident.forecast;
+      }
     }
+  } catch (error) {
+    if (!hasAnyBestTimeForecast(venue)) {
+      upsertVenue({
+        id: venue.id,
+        forecast_updated_at: Date.now(),
+        forecast_source: "besttime_error",
+      });
+    }
+    return;
   }
 
   if (forecast && besttimeVenueId) {
@@ -304,7 +331,7 @@ async function refreshBestTimeForecast(venue: DBVenue): Promise<void> {
     upsertVenue({
       id: venue.id,
       forecast_updated_at: Date.now(),
-      forecast_source: "unavailable",
+      forecast_source: "besttime_unavailable",
     });
   }
 }

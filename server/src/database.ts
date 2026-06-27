@@ -13,7 +13,7 @@ export interface DBVenue {
   wash_type: string | null;
   forecast_json: string | null; // stored as JSON string
   forecast_updated_at: number | null; // Unix timestamp
-  forecast_source: string | null; // besttime, synthetic, unavailable
+  forecast_source: string | null; // besttime, synthetic, besttime_unavailable, besttime_error
   community_wait_minutes: number | null;
   community_wait_updated_at: number | null;
   created_at: number; // Unix timestamp
